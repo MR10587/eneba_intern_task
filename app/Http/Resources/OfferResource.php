@@ -29,7 +29,10 @@ class OfferResource extends JsonResource
             'region' => $this->resource->region,
             'price_cents' => (int) $this->resource->price_cents,
             'currency' => config('catalog.currency'),
-            'available' => $availableKeyCount > 0,
+            // WHY: an offer deactivated after it was added to a cart still has
+            // available keys. Availability must also require is_active so a
+            // stale cart line is never advertised as purchasable.
+            'available' => (bool) $this->resource->is_active && $availableKeyCount > 0,
         ];
     }
 }

@@ -71,6 +71,26 @@ class ApiException extends Exception
         );
     }
 
+    public static function offerNotFound(): self
+    {
+        return new self(
+            ErrorCode::OfferNotFound,
+            ErrorCode::OfferNotFound->defaultMessage(),
+            [],
+            ErrorCode::OfferNotFound->status(),
+        );
+    }
+
+    public static function insufficientInventory(): self
+    {
+        return new self(
+            ErrorCode::InsufficientInventory,
+            ErrorCode::InsufficientInventory->defaultMessage(),
+            [],
+            ErrorCode::InsufficientInventory->status(),
+        );
+    }
+
     public static function notFound(): self
     {
         return new self(

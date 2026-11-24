@@ -1,4 +1,4 @@
-# API contract — Catalog + Authentication + Search + Homepage slices (Phase 2)
+# API contract — Catalog + Authentication + Search + Homepage + Cart slices (Phase 2)
 
 Base URL: `http://127.0.0.1:8000/api` (Vite proxies `/api` to this during development).
 
@@ -9,12 +9,15 @@ Implemented:
 - `GET /products`
 - `GET /products/{slug}`
 - `GET /search`
+- `GET /cart` (token required)
+- `POST /cart/items` (token required)
+- `DELETE /cart/items/{offer}` (token required)
 - `POST /auth/register`
 - `POST /auth/login`
 - `POST /auth/logout` (token required)
 - `GET /auth/me` (token required)
 
-Cart, checkout and orders are **not implemented yet**.
+Checkout and orders are **not implemented yet**.
 
 All prices are **integer cents in EUR**. The `currency` field is always `"EUR"`.
 The client must format cents for display; it must never compute or alter prices.
@@ -37,12 +40,15 @@ The client must format cents for display; it must never compute or alter prices.
 
 | Code | Status | Where |
 | --- | --- | --- |
-| `VALIDATION_ERROR` | 422 | All endpoints |
-| `PRODUCT_NOT_FOUND` | 404 | Catalog detail |
+| `VALIDATION_ERROR` | 422 | Endpoints with request bodies/parameters |
+| `PRODUCT_NOT_FOUND` | 404 | Catalog detail, cart add |
+| `OFFER_NOT_FOUND` | 404 | Cart add |
+| `NOT_FOUND` | 404 | Cart delete |
+| `INSUFFICIENT_INVENTORY` | 409 | Cart add when the offer is inactive or sold out |
 | `INVALID_CREDENTIALS` | 401 | Login |
 | `UNAUTHENTICATED` | 401 | Protected routes without a valid token |
 
-Other codes in `App\Enums\ErrorCode` are reserved for later slices.
+`PAYMENT_FAILED` (402) and `FORBIDDEN`/`INTERNAL_ERROR` are reserved for later slices.
 
 ## `GET /products/filters`
 
@@ -342,8 +348,66 @@ Returns the same `user` object shown above, directly under `data` (no token fiel
 
 ### Missing or invalid token
 
-Applies to `logout` and `me`:
+Applies to `logout`, `me`, and all cart endpoints:
 
 ```json
 { "message": "Authentication is required.", "code": "UNAUTHENTICATED" }
 ```
+
+## Cart — token required
+
+There is exactly one cart per user. It is always derived from the authenticated
+user, so the client never sends a cart ID, user ID, price, or total. Quantity is
+always `1` per offer and there is intentionally **no** quantity-update endpoint.
+
+Only an **active product**, an **active offer**, and at least one **available
+digital key** can be added. If an item becomes stale after it was added (key sold
+or offer deactivated), it remains visible with `"available": false`; its price is
+never silently changed. Checkout performs the authoritative recheck later.
+
+### `GET /cart`
+
+```json
+{
+  "data": {
+    "items": [
+      {
+        "id": 1,
+        "product_id": 2,
+        "offer_id": 3,
+        "quantity": 1,
+        "product": { "...": "ProductResource summary" },
+        "offer": { "...": "OfferResource" },
+        "line_total_cents": 1999,
+        "currency": "EUR",
+        "available": true
+      }
+    ],
+    "total_cents": 1999,
+    "currency": "EUR"
+  },
+  "meta": { "item_count": 1, "available_item_count": 1 }
+}
+```
+
+`total_cents` is the sum of all line totals (including stale items).
+`available_item_count` lets the SPA warn about stale items without rechecking stock.
+
+### `POST /cart/items`
+
+Body: `{ "product_id": 2, "offer_id": 3 }`. No other fields are accepted; any
+client-sent `price_cents`, `total_cents`, or `quantity` is ignored.
+
+- New item → `201` with the updated cart.
+- Offer already in the cart → `200` with the unchanged cart (idempotent add).
+- Missing/inactive product → `404 PRODUCT_NOT_FOUND`.
+- Missing offer, or an offer belonging to a different product → `404 OFFER_NOT_FOUND`.
+- Inactive offer or no available key → `409 INSUFFICIENT_INVENTORY`.
+
+Validation of the two IDs uses the shared `422 VALIDATION_ERROR` envelope.
+
+### `DELETE /cart/items/{offer}`
+
+Deletes that offer from the current user's cart only and returns `200` with the
+updated cart. An offer that is not in this user's cart returns
+`404 NOT_FOUND`; another user's item is indistinguishable from a missing one.

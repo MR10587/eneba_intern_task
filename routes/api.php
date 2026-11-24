@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Api\AuthController;
+use App\Http\Controllers\Api\CartController;
 use App\Http\Controllers\Api\HomeController;
 use App\Http\Controllers\Api\ProductController;
 use App\Http\Controllers\Api\SearchController;
@@ -52,3 +53,16 @@ Route::prefix('products')->group(function (): void {
  * the same purchasable-price rule as the catalog.
  */
 Route::get('search', SearchController::class);
+
+/**
+ * Cart endpoints — signed-in only.
+ *
+ * WHY: the whole group sits behind auth:sanctum. The service derives the cart
+ * from the authenticated user, so no cart or user ID is accepted from the
+ * client and one user can never reach another user's cart.
+ */
+Route::middleware('auth:sanctum')->prefix('cart')->group(function (): void {
+    Route::get('/', [CartController::class, 'index']);
+    Route::post('items', [CartController::class, 'store']);
+    Route::delete('items/{offer}', [CartController::class, 'destroy'])->whereNumber('offer');
+});

@@ -8,7 +8,8 @@
 - Phase 2 catalog slice implemented: `GET /api/products/filters`, `GET /api/products`, `GET /api/products/{slug}`, with coded/error envelopes, EUR cents, backend-computed prices, and 15 feature tests.
 - Phase 2 authentication slice implemented: `POST /api/auth/register`, `POST /api/auth/login`, `POST /api/auth/logout`, `GET /api/auth/me` with Sanctum personal access tokens, bcrypt hashes, and 10 feature tests.
 - Phase 2 search slice implemented: `GET /api/search` with driver-aware pg_trgm/LIKE matching, catalog pricing reuse, `meta.query`/`meta.result_count`, and 7 feature tests.
-- Phase 2 homepage slice implemented: `GET /api/home` with DB-driven `homepage_blocks`, `banner`/`best_sellers`/`deals` resolvers, graceful unknown types, `meta.block_count`, and 8 feature tests. Cart/checkout/orders are not implemented yet.
+- Phase 2 homepage slice implemented: `GET /api/home` with DB-driven `homepage_blocks`, `banner`/`best_sellers`/`deals` resolvers, graceful unknown types, `meta.block_count`, and 8 feature tests.
+- Phase 2 cart slice implemented: `GET /api/cart`, `POST /api/cart/items`, `DELETE /api/cart/items/{offer}` with Sanctum auth, per-user scoping, backend-computed line totals, stale-item flags, coded errors, and 11 feature tests. Checkout/orders are not implemented yet.
 - `SPEC.md` is the product source of truth; `plan.md` is the implementation plan.
 
 ## Windows environment (verified 2026-11-24)
@@ -33,7 +34,7 @@
 ## Phase 2 decisions (user-approved)
 
 - Currency is **EUR**, stored and returned as integer cents; `config/catalog.php` holds the currency and pagination defaults. A non-destructive migration changed `offers` / `orders` currency defaults from USD to EUR.
-- Cart quantity is always 1 per offer and the `PATCH /cart/items/{offer}` route was **removed**.
+- Cart quantity is always 1 per offer and the `PATCH /cart/items/{offer}` route was **removed**. Cart is derived from `auth()->id()` via `firstOrCreate` — no cart ID from the client and no `CartPolicy`. Duplicate add returns `200`; new add returns `201`. Stale items stay visible with `available: false`; prices are never silently changed. `OfferResource.available` requires both `is_active` and an available key.
 - Filter options come from `GET /products/filters`; `relevance` sort aliases `popularity` on the catalog endpoint.
 - Search (`GET /search`): pg_trgm similarity > 0.3 OR case-insensitive substring on PostgreSQL; SQLite tests use a LIKE fallback. Reuses `ProductResource` and catalog pricing; returns `meta.query` and `meta.result_count`.
 - Homepage (`GET /home`): one public endpoint; enabled `homepage_blocks` ordered by `position`, then `id`. `banner`/`best_sellers`/`deals` resolvers read DB config; unknown types return `data: []`. `config/home.php` holds only item limits, never content.
@@ -43,8 +44,8 @@
 ## Verified commands (PowerShell)
 
 - `& 'C:\php\php.exe' artisan --version` → `Laravel Framework 13.43.0`
-- `& 'C:\php\php.exe' artisan test` → 42 passed, 283 assertions (2 defaults + 15 catalog/product + 7 search + 8 home + 10 auth tests)
-- `& 'C:\php\php.exe' artisan route:list --path=api` → 9 routes (1 home + 3 catalog + 1 search + 4 auth)
+- `& 'C:\php\php.exe' artisan test` → 53 passed, 362 assertions (2 defaults + 15 catalog/product + 7 search + 8 home + 11 cart + 10 auth tests)
+- `& 'C:\php\php.exe' artisan route:list --path=api` → 12 routes (1 home + 3 catalog + 1 search + 3 cart + 4 auth)
 - `& 'C:\php\php.exe' vendor/bin/pint --test` → passed
 - `& 'C:\php\php.exe' artisan migrate:status` → all migrations Ran; `artisan db:show` → PostgreSQL 18.6 / `eneba_store`
 - `& 'C:\php\php.exe' artisan install:api --no-interaction` → Sanctum v4.5.0 installed and its migration ran
