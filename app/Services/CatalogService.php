@@ -178,6 +178,26 @@ class CatalogService
     }
 
     /**
+     * Active product summary for homepage blocks.
+     *
+     * WHY: banner configuration can point at a missing or inactive slug.
+     * Returning null lets the caller degrade gracefully instead of throwing
+     * PRODUCT_NOT_FOUND and breaking the whole homepage. Offers are
+     * intentionally not loaded, so ProductResource returns a catalog summary
+     * rather than the product detail payload.
+     */
+    public function findActiveSummaryBySlug(string $slug): ?Product
+    {
+        $query = Product::query()
+            ->where('products.slug', $slug)
+            ->where('products.is_active', true);
+
+        $this->addComputedPriceColumns($query);
+
+        return $query->first();
+    }
+
+    /**
      * Query builder for offers that a buyer could actually purchase.
      */
     private function purchasableOffersQuery(): Builder

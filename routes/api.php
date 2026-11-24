@@ -1,9 +1,19 @@
 <?php
 
 use App\Http\Controllers\Api\AuthController;
+use App\Http\Controllers\Api\HomeController;
 use App\Http\Controllers\Api\ProductController;
 use App\Http\Controllers\Api\SearchController;
 use Illuminate\Support\Facades\Route;
+
+/**
+ * Homepage endpoint.
+ *
+ * WHY: one public endpoint returns enabled blocks in configured order. Each
+ * block's content is resolved server-side from its own type and DB config, so
+ * the SPA only renders what it receives.
+ */
+Route::get('home', HomeController::class);
 
 /**
  * Authentication endpoints.

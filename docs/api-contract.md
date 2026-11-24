@@ -1,9 +1,10 @@
-# API contract — Catalog + Authentication + Search slices (Phase 2)
+# API contract — Catalog + Authentication + Search + Homepage slices (Phase 2)
 
 Base URL: `http://127.0.0.1:8000/api` (Vite proxies `/api` to this during development).
 
 Implemented:
 
+- `GET /home`
 - `GET /products/filters`
 - `GET /products`
 - `GET /products/{slug}`
@@ -13,7 +14,7 @@ Implemented:
 - `POST /auth/logout` (token required)
 - `GET /auth/me` (token required)
 
-Homepage, cart, checkout and orders are **not implemented yet**.
+Cart, checkout and orders are **not implemented yet**.
 
 All prices are **integer cents in EUR**. The `currency` field is always `"EUR"`.
 The client must format cents for display; it must never compute or alter prices.
@@ -223,6 +224,71 @@ active offer with an available key. `offers` is not included in search results.
 `meta.result_count` is the total number of matches across all pages, not just
 the number of rows in `data`. Invalid parameters return the shared
 `422 VALIDATION_ERROR` envelope with `errors.q` and/or `errors.per_page`.
+
+## `GET /home`
+
+Public endpoint. Returns only enabled `homepage_blocks` rows, ordered by
+`position` then `id`. Each block's content is resolved server-side from its own
+`type` and `config`, so the SPA renders generically and hardcodes no products,
+headlines, or block data. Seed configuration arrives in Phase 4; until then
+temporary DB rows are used for manual checks.
+
+```json
+{
+  "data": [
+    {
+      "key": "demo-hero",
+      "title": "Featured game",
+      "type": "banner",
+      "position": 0,
+      "data": {
+        "headline": "Featured this week",
+        "subheadline": "A great price",
+        "cta_label": "Buy now",
+        "cta_href": "/products/demo-minecraft",
+        "product": {
+          "id": 2,
+          "slug": "demo-minecraft",
+          "name": "Minecraft",
+          "min_price_cents": 1999,
+          "currency": "EUR",
+          "available": true,
+          "available_offer_count": 1
+        }
+      }
+    },
+    {
+      "key": "demo-best-sellers",
+      "title": "Best sellers",
+      "type": "best_sellers",
+      "position": 1,
+      "data": ["ProductResource summaries, popularity desc"]
+    },
+    {
+      "key": "demo-deals",
+      "title": "Deals",
+      "type": "deals",
+      "position": 2,
+      "data": ["ProductResource summaries with backend-computed discount_percent"]
+    }
+  ],
+  "meta": { "block_count": 3 }
+}
+```
+
+`meta.block_count` is the number of enabled blocks, not the number of items
+inside them.
+
+Block config keys:
+
+| Type | Config keys | Behavior |
+| --- | --- | --- |
+| `banner` | `product_slug`, `headline`, `subheadline`, `cta_label`, `cta_href` | Resolves an active product summary. Missing/inactive slug returns `"product": null`; the block still renders. No fallback slug exists in code. |
+| `best_sellers` | `limit` (optional) | Active products ordered by popularity then slug. Default 8, clamped to 1–12. |
+| `deals` | `limit` (optional) | Active products with a purchasable price and `compare_at_price_cents > min_price_cents`. Default 8, clamped to 1–12. |
+
+Any other `type` returns `"data": []` without failing the request. Disabled
+blocks are never returned.
 
 ## Authentication
 
