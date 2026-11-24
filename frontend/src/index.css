@@ -1,0 +1,16 @@
+@import './styles/tokens.css';
+
+* {
+    box-sizing: border-box;
+}
+
+body {
+    margin: 0;
+    font-family: system-ui, sans-serif;
+    background: var(--color-bg);
+    color: var(--color-text);
+}
+
+main {
+    padding: var(--space-3);
+}

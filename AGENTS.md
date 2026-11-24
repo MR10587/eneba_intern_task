@@ -2,8 +2,41 @@
 
 ## Repo state
 
-- Greenfield: only `SPEC.md` exists — no code, config, lockfiles, or commits. `SPEC.md` is the only source of truth; update this file when scripts/config land.
-- No build, test, lint, or dev commands exist yet. Record exact commands here (including single-test invocation and any required order) once tooling is added.
+- Laravel backend scaffolded at the repo root: skeleton `v13.0.0`, framework `v13.43.0`. Existing docs (`SPEC.md`, `AGENTS.md`, `CHAT_HISTORY.md`, `plan.md`) were preserved.
+- Separate `frontend/` Vite + React + TypeScript SPA is scaffolded; Laravel root remains API-only.
+- Sanctum is installed (`personal_access_tokens` table, `HasApiTokens` on `User`). Domain schema and models exist: products, sellers, offers, digital_keys, carts, cart_items, orders, order_items, homepage_blocks. No controllers, business logic, or API endpoints yet.
+- `SPEC.md` is the product source of truth; `plan.md` is the implementation plan.
+
+## Windows environment (verified 2026-11-24)
+
+- Windows 11. PHP 8.5.9 at `C:\php\php.exe`; Composer 2.11.2 at `C:\ProgramData\ComposerSetup\bin\composer.bat`. Neither is on `PATH`.
+- For Composer in PowerShell, prefix the session PATH: `$env:PATH = 'C:\php;' + $env:PATH`, then call `composer`. Alternative without PATH changes: `& 'C:\php\php.exe' 'C:\ProgramData\ComposerSetup\bin\composer.phar' <args>`.
+- Node 24.22.1 and npm 11.19.1 are installed at `C:\Program Files\nodejs\` and on `PATH`.
+- Docker Desktop is not installed. Do not use Sail, `sail ...`, or `docker compose`; use native PHP commands. The Docker/Sail steps in `plan.md` are blocked until this changes.
+- Enabled in `C:\php\php.ini` (backup at `C:\php\php.ini.bak`): `fileinfo`, `intl`, `pdo_pgsql`, `pdo_sqlite`, `zip`. `intl` is required by Laravel's number formatting; without it artisan commands throw.
+- The root `package.json` / `vite.config.js` belong to Laravel's Blade/Tailwind asset pipeline — do not add React there. The SPA is `frontend/`, on port 5173, proxying `/api` to `http://127.0.0.1:8000`.
+- `.env` uses `DB_CONNECTION=pgsql`, host `127.0.0.1:5432`, database `eneba_store`, user `postgres`. Verified against PostgreSQL 18.6; all migrations are Ran. Plan's `DB_HOST=pgsql` / `docker-compose.yml` are intentionally not used because Docker is unavailable; native PostgreSQL is reached over localhost.
+- `phpunit.xml` forces in-memory SQLite. Keep PostgreSQL-only SQL (the `pg_trgm` extension and GIN index) guarded by a driver check or tests will fail.
+- Frontend uses **oxlint + Prettier**, not ESLint. `typescript-eslint@8` declares `typescript <6.1.0` and cannot support the project's TypeScript 7.0.2; oxlint is the Vite 9 template linter and works. Prettier supplies formatting.
+
+## Phase 0/1 audit (verified 2026-11-24)
+
+- All Phase 0/1 schema entities exist in PostgreSQL with the expected columns, FKs, and unique indexes; `pg_trgm` extension and `products_name_trgm_idx` GIN index are present.
+- `migrate:fresh --seed` succeeds on PostgreSQL and on in-memory SQLite. `DatabaseSeeder` currently creates only the default `test@example.com` user; product/offer/homepage seed data is Phase 4.
+- `minecraft` / `minec` trigram scores and `ILIKE` hits verified; `mincraft` has similarity ~0.583 but no `ILIKE` hit, which is why Phase 2 search must rank by similarity rather than rely on `ILIKE` alone.
+- Laravel 13's `Blueprint` has no `check()` method. Enumerated statuses (`available`/`sold`, `pending`/`completed`/`failed`) and `quantity > 0` are therefore enforced by FormRequest validation in Phase 2, not DB CHECK constraints.
+
+## Verified commands (PowerShell)
+
+- `& 'C:\php\php.exe' artisan --version` → `Laravel Framework 13.43.0`
+- `& 'C:\php\php.exe' artisan test` → 2 passed (default Laravel tests)
+- `& 'C:\php\php.exe' artisan migrate:status` → all migrations Ran; `artisan db:show` → PostgreSQL 18.6 / `eneba_store`
+- `& 'C:\php\php.exe' artisan install:api --no-interaction` → Sanctum v4.5.0 installed and its migration ran
+- `& 'C:\php\php.exe' artisan migrate --force` → 10 domain migrations applied; `pg_trgm` extension and `products_name_trgm_idx` verified present in PostgreSQL
+- `& 'C:\php\php.exe' artisan migrate:fresh --seed --force --no-interaction` → succeeds on PostgreSQL; `$env:DB_CONNECTION='sqlite'; $env:DB_DATABASE=':memory:'; & 'C:\php\php.exe' artisan migrate:fresh --force` → succeeds on SQLite
+- `$env:PATH = 'C:\php;' + $env:PATH; & 'C:\ProgramData\ComposerSetup\bin\composer.bat' check-platform-reqs` → all requirements satisfied
+- `& 'C:\php\php.exe' artisan serve` and `npm run dev` in `frontend/` — both confirmed working by the user.
+- In `frontend/`: `npm install`, `npm run typecheck`, `npm test`, `npm run lint`, `npm run format:check`, `npm run build` → all pass (Vitest 5.1.1, 1 test; Vite 8.3.8).
 
 ## Hard constraints (from `SPEC.md`)
 
@@ -38,6 +71,6 @@ No seller registration/dashboard, admin dashboard (seed data is sufficient), ref
 
 ## Stack
 
-- Frontend: React + TypeScript
-- Backend: PHP + Laravel
-- Database: PostgreSQL
+- Frontend: React 19 + TypeScript 7 + Vite 8 in `frontend/`
+- Backend: PHP 8.5.9 + Laravel 13.43.0
+- Database: PostgreSQL 18.6 (`eneba_store`)
