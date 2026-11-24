@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\ProductController;
+use App\Http\Controllers\Api\SearchController;
 use Illuminate\Support\Facades\Route;
 
 /**
@@ -32,3 +33,12 @@ Route::prefix('products')->group(function (): void {
     Route::get('/', [ProductController::class, 'index']);
     Route::get('{slug}', [ProductController::class, 'show'])->where('slug', '[A-Za-z0-9-]+');
 });
+
+/**
+ * Search endpoint.
+ *
+ * WHY: /search is a separate read model from /products. It adds relevance
+ * ranking and a total match count while reusing the same ProductResource and
+ * the same purchasable-price rule as the catalog.
+ */
+Route::get('search', SearchController::class);

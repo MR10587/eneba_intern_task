@@ -1,4 +1,4 @@
-# API contract — Catalog + Authentication slices (Phase 2)
+# API contract — Catalog + Authentication + Search slices (Phase 2)
 
 Base URL: `http://127.0.0.1:8000/api` (Vite proxies `/api` to this during development).
 
@@ -7,12 +7,13 @@ Implemented:
 - `GET /products/filters`
 - `GET /products`
 - `GET /products/{slug}`
+- `GET /search`
 - `POST /auth/register`
 - `POST /auth/login`
 - `POST /auth/logout` (token required)
 - `GET /auth/me` (token required)
 
-Search, homepage, cart, checkout and orders are **not implemented yet**.
+Homepage, cart, checkout and orders are **not implemented yet**.
 
 All prices are **integer cents in EUR**. The `currency` field is always `"EUR"`.
 The client must format cents for display; it must never compute or alter prices.
@@ -77,8 +78,8 @@ Unknown parameters are ignored. All filters are ANDed.
 Pricing rule: `min_price_cents` is the cheapest **active** offer that still has at least
 one `available` digital key. A product with no such offer remains visible with
 `min_price_cents: null`, `available: false`, and `available_offer_count: 0`; price filters
-never match it, and price sorts place it last. `relevance` currently aliases `popularity`
-because there is no search term on this endpoint.
+never match it, and price sorts place it last. `relevance` aliases `popularity`
+here because there is no search term; real typo-tolerant ranking lives in `GET /search`.
 
 ```json
 {
@@ -173,6 +174,55 @@ Missing or inactive slug:
 ```json
 { "message": "Product not found.", "code": "PRODUCT_NOT_FOUND" }
 ```
+
+## `GET /search`
+
+Query parameters:
+
+| Param | Default | Rules |
+| --- | --- | --- |
+| `q` | required | Trimmed text, 2–64 characters |
+| `page` | `1` | `>= 1` |
+| `per_page` | `12` | `1–48` |
+
+Matching is case-insensitive. On PostgreSQL it uses `pg_trgm` similarity plus a
+substring match, so partial names (`Minec`) and typos (`mincraft`) both find
+`Minecraft`. Results are ordered by relevance, then popularity, then slug.
+The SQLite test database has no trigram functions, so it uses a portable `LIKE`
+fallback: partial matches work, typo tolerance does not. This driver check keeps
+the test suite runnable without PostgreSQL-specific SQL errors.
+
+Search rows use the same `ProductResource` and pricing rule as `GET /products`:
+only active products are returned, and `min_price_cents` comes from the cheapest
+active offer with an available key. `offers` is not included in search results.
+
+```json
+{
+  "data": [
+    {
+      "id": 1,
+      "slug": "minecraft",
+      "name": "Minecraft",
+      "min_price_cents": 1999,
+      "currency": "EUR",
+      "available": true,
+      "available_offer_count": 3
+    }
+  ],
+  "meta": {
+    "query": "mincraft",
+    "result_count": 1,
+    "pagination": {
+      "current_page": 1, "per_page": 12, "total": 1,
+      "last_page": 1, "from": 1, "to": 1
+    }
+  }
+}
+```
+
+`meta.result_count` is the total number of matches across all pages, not just
+the number of rows in `data`. Invalid parameters return the shared
+`422 VALIDATION_ERROR` envelope with `errors.q` and/or `errors.per_page`.
 
 ## Authentication
 

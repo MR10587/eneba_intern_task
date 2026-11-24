@@ -198,9 +198,11 @@ class CatalogService
      * Attach the two computed columns used by the catalog list.
      *
      * WHY: both subqueries correlate to products.id and count only offers
-     * that are active and still have an unassigned key.
+     * that are active and still have an unassigned key. This is public
+     * because SearchService returns the same product DTO and must apply the
+     * identical pricing rule — there is only one definition of "purchasable".
      */
-    private function addComputedPriceColumns(EloquentBuilder $query): void
+    public function addComputedPriceColumns(EloquentBuilder $query): void
     {
         $query->select('products.*')
             ->selectSub($this->availableOfferSubquery('MIN(offers.price_cents)'), 'min_price_cents')

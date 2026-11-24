@@ -6,7 +6,8 @@
 - Separate `frontend/` Vite + React + TypeScript SPA is scaffolded; Laravel root remains API-only.
 - Sanctum is installed (`personal_access_tokens` table, `HasApiTokens` on `User`). Domain schema and models exist: products, sellers, offers, digital_keys, carts, cart_items, orders, order_items, homepage_blocks.
 - Phase 2 catalog slice implemented: `GET /api/products/filters`, `GET /api/products`, `GET /api/products/{slug}`, with coded/error envelopes, EUR cents, backend-computed prices, and 15 feature tests.
-- Phase 2 authentication slice implemented: `POST /api/auth/register`, `POST /api/auth/login`, `POST /api/auth/logout`, `GET /api/auth/me` with Sanctum personal access tokens, bcrypt hashes, and 10 feature tests. Search/home/cart/checkout/orders are not implemented yet.
+- Phase 2 authentication slice implemented: `POST /api/auth/register`, `POST /api/auth/login`, `POST /api/auth/logout`, `GET /api/auth/me` with Sanctum personal access tokens, bcrypt hashes, and 10 feature tests.
+- Phase 2 search slice implemented: `GET /api/search` with driver-aware pg_trgm/LIKE matching, catalog pricing reuse, `meta.query`/`meta.result_count`, and 7 feature tests. Homepage/cart/checkout/orders are not implemented yet.
 - `SPEC.md` is the product source of truth; `plan.md` is the implementation plan.
 
 ## Windows environment (verified 2026-11-24)
@@ -33,14 +34,15 @@
 - Currency is **EUR**, stored and returned as integer cents; `config/catalog.php` holds the currency and pagination defaults. A non-destructive migration changed `offers` / `orders` currency defaults from USD to EUR.
 - Cart quantity is always 1 per offer and the `PATCH /cart/items/{offer}` route was **removed**.
 - Filter options come from `GET /products/filters`; `relevance` sort aliases `popularity` on the catalog endpoint.
+- Search (`GET /search`): pg_trgm similarity > 0.3 OR case-insensitive substring on PostgreSQL; SQLite tests use a LIKE fallback. Reuses `ProductResource` and catalog pricing; returns `meta.query` and `meta.result_count`.
 - Checkout (later): no order row at all on payment failure; create the order before order items; re-check key status after `lockForUpdate()`.
 - Auth: Sanctum personal access tokens named `api`, returned once as `{token, token_type: "Bearer"}`. Wrong email/password uses a distinct `INVALID_CREDENTIALS` (401) code; missing token uses `UNAUTHENTICATED` (401). Duplicate email is a `VALIDATION_ERROR`. `logout` deletes only the current token. Emails are lowercased on input.
 
 ## Verified commands (PowerShell)
 
 - `& 'C:\php\php.exe' artisan --version` → `Laravel Framework 13.43.0`
-- `& 'C:\php\php.exe' artisan test` → 27 passed, 188 assertions (2 defaults + 15 catalog + 10 auth tests)
-- `& 'C:\php\php.exe' artisan route:list --path=api` → 7 routes (3 catalog + 4 auth)
+- `& 'C:\php\php.exe' artisan test` → 34 passed, 237 assertions (2 defaults + 15 catalog/product + 7 search + 10 auth tests)
+- `& 'C:\php\php.exe' artisan route:list --path=api` → 8 routes (3 catalog + 1 search + 4 auth)
 - `& 'C:\php\php.exe' vendor/bin/pint --test` → passed
 - `& 'C:\php\php.exe' artisan migrate:status` → all migrations Ran; `artisan db:show` → PostgreSQL 18.6 / `eneba_store`
 - `& 'C:\php\php.exe' artisan install:api --no-interaction` → Sanctum v4.5.0 installed and its migration ran
