@@ -1,7 +1,25 @@
 <?php
 
+use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\ProductController;
 use Illuminate\Support\Facades\Route;
+
+/**
+ * Authentication endpoints.
+ *
+ * WHY the split group: register/login must be reachable anonymously, while
+ * logout/me need a Sanctum personal access token. `auth:sanctum` failures are
+ * rendered as 401 UNAUTHENTICATED by bootstrap/app.php.
+ */
+Route::prefix('auth')->group(function (): void {
+    Route::post('register', [AuthController::class, 'register']);
+    Route::post('login', [AuthController::class, 'login']);
+
+    Route::middleware('auth:sanctum')->group(function (): void {
+        Route::post('logout', [AuthController::class, 'logout']);
+        Route::get('me', [AuthController::class, 'me']);
+    });
+});
 
 /**
  * Catalog endpoints — the first API slice.

@@ -45,6 +45,22 @@ class ApiException extends Exception
         );
     }
 
+    /**
+     * Wrong email/password combination on /auth/login.
+     *
+     * WHY: the same code is used for an unknown email and a wrong password so
+     * the endpoint cannot be used to enumerate registered accounts.
+     */
+    public static function invalidCredentials(): self
+    {
+        return new self(
+            ErrorCode::InvalidCredentials,
+            ErrorCode::InvalidCredentials->defaultMessage(),
+            [],
+            ErrorCode::InvalidCredentials->status(),
+        );
+    }
+
     public static function productNotFound(): self
     {
         return new self(

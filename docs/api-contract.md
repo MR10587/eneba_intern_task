@@ -1,4 +1,4 @@
-# API contract — Catalog slice (Phase 2, first slice)
+# API contract — Catalog + Authentication slices (Phase 2)
 
 Base URL: `http://127.0.0.1:8000/api` (Vite proxies `/api` to this during development).
 
@@ -7,8 +7,12 @@ Implemented:
 - `GET /products/filters`
 - `GET /products`
 - `GET /products/{slug}`
+- `POST /auth/register`
+- `POST /auth/login`
+- `POST /auth/logout` (token required)
+- `GET /auth/me` (token required)
 
-Authentication, search, homepage, cart, checkout and orders are **not implemented yet**.
+Search, homepage, cart, checkout and orders are **not implemented yet**.
 
 All prices are **integer cents in EUR**. The `currency` field is always `"EUR"`.
 The client must format cents for display; it must never compute or alter prices.
@@ -27,8 +31,16 @@ The client must format cents for display; it must never compute or alter prices.
 { "message": "The given parameters were invalid.", "code": "VALIDATION_ERROR", "errors": { "sort": ["..."] } }
 ```
 
-`errors` is present only for validation failures. Catalog uses `VALIDATION_ERROR` (422)
-and `PRODUCT_NOT_FOUND` (404). Other codes are reserved for later slices.
+`errors` is present only for validation failures. Currently used codes:
+
+| Code | Status | Where |
+| --- | --- | --- |
+| `VALIDATION_ERROR` | 422 | All endpoints |
+| `PRODUCT_NOT_FOUND` | 404 | Catalog detail |
+| `INVALID_CREDENTIALS` | 401 | Login |
+| `UNAUTHENTICATED` | 401 | Protected routes without a valid token |
+
+Other codes in `App\Enums\ErrorCode` are reserved for later slices.
 
 ## `GET /products/filters`
 
@@ -160,4 +172,62 @@ Missing or inactive slug:
 
 ```json
 { "message": "Product not found.", "code": "PRODUCT_NOT_FOUND" }
+```
+
+## Authentication
+
+Passwords are hashed with bcrypt. Registration and login issue a Laravel Sanctum
+personal access token named `api`; only its hash is stored. Send it on protected
+routes as `Authorization: Bearer <token>`. Email addresses are lowercased on input,
+and there is no email verification or social login.
+
+### `POST /auth/register`
+
+Body: `{ "name": "...", "email": "...", "password": "min 8 chars", "password_confirmation": "..." }`
+
+201 response:
+
+```json
+{
+  "data": {
+    "user": {
+      "id": 1, "name": "Ada", "email": "ada@example.com",
+      "email_verified_at": null, "created_at": "...", "updated_at": "..."
+    },
+    "token": "1|plainTextToken",
+    "token_type": "Bearer"
+  }
+}
+```
+
+Duplicate email or invalid fields → `422 VALIDATION_ERROR` with `errors.email` /
+`errors.password`. No token is issued on failure.
+
+### `POST /auth/login`
+
+Body: `{ "email": "...", "password": "..." }`. 200 response: identical `data` shape
+to registration. Wrong password **or** unknown email → `401 INVALID_CREDENTIALS`:
+
+```json
+{ "message": "The provided credentials are incorrect.", "code": "INVALID_CREDENTIALS" }
+```
+
+### `POST /auth/logout` — token required
+
+Deletes only the token used for the request, so other signed-in devices stay valid.
+
+```json
+{ "data": { "message": "Logged out successfully." } }
+```
+
+### `GET /auth/me` — token required
+
+Returns the same `user` object shown above, directly under `data` (no token field).
+
+### Missing or invalid token
+
+Applies to `logout` and `me`:
+
+```json
+{ "message": "Authentication is required.", "code": "UNAUTHENTICATED" }
 ```

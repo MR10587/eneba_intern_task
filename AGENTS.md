@@ -5,7 +5,8 @@
 - Laravel backend scaffolded at the repo root: skeleton `v13.0.0`, framework `v13.43.0`. Existing docs (`SPEC.md`, `AGENTS.md`, `CHAT_HISTORY.md`, `plan.md`) were preserved.
 - Separate `frontend/` Vite + React + TypeScript SPA is scaffolded; Laravel root remains API-only.
 - Sanctum is installed (`personal_access_tokens` table, `HasApiTokens` on `User`). Domain schema and models exist: products, sellers, offers, digital_keys, carts, cart_items, orders, order_items, homepage_blocks.
-- Phase 2 catalog slice implemented: `GET /api/products/filters`, `GET /api/products`, `GET /api/products/{slug}`, with coded/error envelopes, EUR cents, backend-computed prices, and 14 feature tests. Auth/search/home/cart/checkout/orders are not implemented yet.
+- Phase 2 catalog slice implemented: `GET /api/products/filters`, `GET /api/products`, `GET /api/products/{slug}`, with coded/error envelopes, EUR cents, backend-computed prices, and 15 feature tests.
+- Phase 2 authentication slice implemented: `POST /api/auth/register`, `POST /api/auth/login`, `POST /api/auth/logout`, `GET /api/auth/me` with Sanctum personal access tokens, bcrypt hashes, and 10 feature tests. Search/home/cart/checkout/orders are not implemented yet.
 - `SPEC.md` is the product source of truth; `plan.md` is the implementation plan.
 
 ## Windows environment (verified 2026-11-24)
@@ -33,12 +34,13 @@
 - Cart quantity is always 1 per offer and the `PATCH /cart/items/{offer}` route was **removed**.
 - Filter options come from `GET /products/filters`; `relevance` sort aliases `popularity` on the catalog endpoint.
 - Checkout (later): no order row at all on payment failure; create the order before order items; re-check key status after `lockForUpdate()`.
+- Auth: Sanctum personal access tokens named `api`, returned once as `{token, token_type: "Bearer"}`. Wrong email/password uses a distinct `INVALID_CREDENTIALS` (401) code; missing token uses `UNAUTHENTICATED` (401). Duplicate email is a `VALIDATION_ERROR`. `logout` deletes only the current token. Emails are lowercased on input.
 
 ## Verified commands (PowerShell)
 
 - `& 'C:\php\php.exe' artisan --version` → `Laravel Framework 13.43.0`
-- `& 'C:\php\php.exe' artisan test` → 17 passed, 98 assertions (2 defaults + 15 catalog tests)
-- `& 'C:\php\php.exe' artisan route:list --path=api` → three catalog routes registered
+- `& 'C:\php\php.exe' artisan test` → 27 passed, 188 assertions (2 defaults + 15 catalog + 10 auth tests)
+- `& 'C:\php\php.exe' artisan route:list --path=api` → 7 routes (3 catalog + 4 auth)
 - `& 'C:\php\php.exe' vendor/bin/pint --test` → passed
 - `& 'C:\php\php.exe' artisan migrate:status` → all migrations Ran; `artisan db:show` → PostgreSQL 18.6 / `eneba_store`
 - `& 'C:\php\php.exe' artisan install:api --no-interaction` → Sanctum v4.5.0 installed and its migration ran

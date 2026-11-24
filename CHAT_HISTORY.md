@@ -561,3 +561,26 @@ All new PHP files include explanatory docblocks, and non-obvious logic has `// W
 Created one temporary Minecraft product with two offers (Europe 1999 with an available key, Global 1499 with a sold key), queried the live endpoints, then deleted exactly those rows by recorded ID. Results: list showed `min_price_cents: 1999` (not 1499), `discount_percent: 33`, `available: true`, `available_offer_count: 1`; detail showed both offers with the 1499 one `available: false`; `min_price=1400&max_price=1600` returned no products; filters returned only Steam / Europe / 1999.
 
 **Bug found by the manual check:** the detail endpoint returned `min_price_cents: null` and `discount_percent: null` while `available: true`, because `findBySlug()` returns a plain Product model without the list query's computed columns. Fixed `CatalogService::findBySlug()` to derive `min_price_cents` from the cheapest available loaded offer and set `available_offer_count` from the same filtered collection. Added assertions to `ProductTest::test_product_detail_returns_seller_offers_with_availability` plus a new `test_sold_out_product_detail_has_null_price_and_no_discount`. Re-verified live then cleaned up: products=0, sellers=0, offers=0, keys=0. Final suite: 17 passed, 98 assertions; Pint passed. Updated AGENTS.md counts accordingly.
+
+## User
+
+> The Catalog API implementation is accepted. Now proceed to the Authentication phase only... Before modifying files, show me the intended file changes and briefly explain the implementation.
+
+Presented the auth plan in conversation (Plan mode, no files changed): new AuthController/AuthService/RegisterRequest/LoginRequest/UserResource/AuthTest, route additions, new `INVALID_CREDENTIALS` code, and the token envelope. Asked for confirmation on two assumptions (new error code, token shape).
+
+## User
+
+> implement
+
+Implemented the auth slice:
+
+- `ErrorCode::InvalidCredentials` (401) + `ApiException::invalidCredentials()`; same envelope, new stable code so wrong credentials are distinguishable from a missing token.
+- `RegisterRequest` lowercases email before `unique:users,email`, requires `name`, valid `email`, and `password` with `min:8` + `confirmed`. `LoginRequest` validates shape only and normalises email identically.
+- `AuthService` hashes with `Hash::make()` at registration, verifies with `Hash::check()` (no `Auth::attempt`, so no session state), issues Sanctum tokens named `api`, and revokes only `currentAccessToken()` on logout.
+- `AuthController` maps results to `ApiResponse`: 201/200 with `{user, token, token_type: "Bearer"}`; `UserResource` allow-lists public fields so password/remember_token never leak.
+- `routes/api.php`: public register/login; `logout`/`me` inside `auth:sanctum`. No `bootstrap/app.php` change was needed — the existing AuthenticationException renderer already emits 401 UNAUTHENTICATED.
+- `tests/Feature/Api/AuthTest.php`: 10 tests covering registration + hashing + token, duplicate email, field validation, successful login, invalid credentials (both wrong password and unknown email), login validation, per-token logout, unauthenticated logout, `/me` shape without secrets, and unauthenticated `/me`.
+
+One test initially failed: after logout, the revoked token still returned 200 on `/me`. Investigation of `vendor/laravel/sanctum/src/Guard.php` and `Illuminate\Auth\RequestGuard` showed the cause is test-only: the RequestGuard caches the resolved user for the app instance's lifetime, and feature tests reuse that instance. Added `Auth::forgetGuards()` in the test with a `// WHY:` comment to simulate a fresh HTTP request. All 10 auth tests then passed without any production change.
+
+Updated `docs/api-contract.md` with the auth contract, plus `AGENTS.md` and `CHAT_HISTORY.md`. No migrations and no destructive DB commands.

@@ -12,6 +12,11 @@ enum ErrorCode: string
 {
     case ValidationError = 'VALIDATION_ERROR';
     case Unauthenticated = 'UNAUTHENTICATED';
+
+    // WHY: a wrong password is different from a missing token. The SPA must
+    // be able to show "check your credentials" instead of "sign in again".
+    case InvalidCredentials = 'INVALID_CREDENTIALS';
+
     case Forbidden = 'FORBIDDEN';
     case NotFound = 'NOT_FOUND';
     case ProductNotFound = 'PRODUCT_NOT_FOUND';
@@ -31,7 +36,7 @@ enum ErrorCode: string
     {
         return match ($this) {
             self::ValidationError => 422,
-            self::Unauthenticated => 401,
+            self::Unauthenticated, self::InvalidCredentials => 401,
             self::Forbidden => 403,
             self::NotFound, self::ProductNotFound, self::OfferNotFound => 404,
             self::PaymentFailed => 402,
@@ -48,6 +53,7 @@ enum ErrorCode: string
         return match ($this) {
             self::ValidationError => 'The given parameters were invalid.',
             self::Unauthenticated => 'Authentication is required.',
+            self::InvalidCredentials => 'The provided credentials are incorrect.',
             self::Forbidden => 'You are not allowed to perform this action.',
             self::NotFound => 'The requested resource was not found.',
             self::ProductNotFound => 'Product not found.',
