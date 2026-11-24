@@ -9,7 +9,8 @@
 - Phase 2 authentication slice implemented: `POST /api/auth/register`, `POST /api/auth/login`, `POST /api/auth/logout`, `GET /api/auth/me` with Sanctum personal access tokens, bcrypt hashes, and 10 feature tests.
 - Phase 2 search slice implemented: `GET /api/search` with driver-aware pg_trgm/LIKE matching, catalog pricing reuse, `meta.query`/`meta.result_count`, and 7 feature tests.
 - Phase 2 homepage slice implemented: `GET /api/home` with DB-driven `homepage_blocks`, `banner`/`best_sellers`/`deals` resolvers, graceful unknown types, `meta.block_count`, and 8 feature tests.
-- Phase 2 cart slice implemented: `GET /api/cart`, `POST /api/cart/items`, `DELETE /api/cart/items/{offer}` with Sanctum auth, per-user scoping, backend-computed line totals, stale-item flags, coded errors, and 11 feature tests. Checkout/orders are not implemented yet.
+- Phase 2 cart slice implemented: `GET /api/cart`, `POST /api/cart/items`, `DELETE /api/cart/items/{offer}` with Sanctum auth, per-user scoping, backend-computed line totals, stale-item flags, coded errors, and 11 feature tests.
+- Phase 2 checkout/orders slice implemented: `POST /api/checkout`, `GET /api/orders`, `GET /api/orders/{id}` with simulated payment, transactional key allocation, per-user order scoping, delivered key detail, coded errors, and 17 feature tests (12 checkout + 5 order). This completes the backend acceptance flow.
 - `SPEC.md` is the product source of truth; `plan.md` is the implementation plan.
 
 ## Windows environment (verified 2026-11-24)
@@ -38,14 +39,16 @@
 - Filter options come from `GET /products/filters`; `relevance` sort aliases `popularity` on the catalog endpoint.
 - Search (`GET /search`): pg_trgm similarity > 0.3 OR case-insensitive substring on PostgreSQL; SQLite tests use a LIKE fallback. Reuses `ProductResource` and catalog pricing; returns `meta.query` and `meta.result_count`.
 - Homepage (`GET /home`): one public endpoint; enabled `homepage_blocks` ordered by `position`, then `id`. `banner`/`best_sellers`/`deals` resolvers read DB config; unknown types return `data: []`. `config/home.php` holds only item limits, never content.
-- Checkout (later): no order row at all on payment failure; create the order before order items; re-check key status after `lockForUpdate()`.
+- Checkout: no order row at all on payment failure; create the order before order items; re-check key status after `lockForUpdate()`; conditional `UPDATE ... WHERE status = 'available'` plus the unique `order_items.digital_key_id` index prevent double assignment.
+- Simulated payment accepts a 13–19 digit `card_number` after stripping spaces/dashes; ending `0002` returns `402 PAYMENT_FAILED` before any write. Only masked last-4 is stored in `payment_reference`; the full card number is never persisted or logged.
+- Orders are always scoped by `auth()->id()` in `OrderService`; there is no `OrderPolicy`. Another user's order returns `404 NOT_FOUND`, not `403`, so order existence is not leaked. `OrderResource` emits both `id` and an `order_id` alias, and exposes `digital_key` only on checkout/detail responses.
 - Auth: Sanctum personal access tokens named `api`, returned once as `{token, token_type: "Bearer"}`. Wrong email/password uses a distinct `INVALID_CREDENTIALS` (401) code; missing token uses `UNAUTHENTICATED` (401). Duplicate email is a `VALIDATION_ERROR`. `logout` deletes only the current token. Emails are lowercased on input.
 
 ## Verified commands (PowerShell)
 
 - `& 'C:\php\php.exe' artisan --version` → `Laravel Framework 13.43.0`
-- `& 'C:\php\php.exe' artisan test` → 53 passed, 362 assertions (2 defaults + 15 catalog/product + 7 search + 8 home + 11 cart + 10 auth tests)
-- `& 'C:\php\php.exe' artisan route:list --path=api` → 12 routes (1 home + 3 catalog + 1 search + 3 cart + 4 auth)
+- `& 'C:\php\php.exe' artisan test` → 70 passed, 513 assertions (2 defaults + 15 catalog/product + 7 search + 8 home + 11 cart + 12 checkout + 5 order + 10 auth tests)
+- `& 'C:\php\php.exe' artisan route:list --path=api` → 15 routes (1 home + 3 catalog + 1 search + 3 cart + 3 checkout/orders + 4 auth)
 - `& 'C:\php\php.exe' vendor/bin/pint --test` → passed
 - `& 'C:\php\php.exe' artisan migrate:status` → all migrations Ran; `artisan db:show` → PostgreSQL 18.6 / `eneba_store`
 - `& 'C:\php\php.exe' artisan install:api --no-interaction` → Sanctum v4.5.0 installed and its migration ran

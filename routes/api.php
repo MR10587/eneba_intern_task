@@ -2,7 +2,9 @@
 
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\CartController;
+use App\Http\Controllers\Api\CheckoutController;
 use App\Http\Controllers\Api\HomeController;
+use App\Http\Controllers\Api\OrderController;
 use App\Http\Controllers\Api\ProductController;
 use App\Http\Controllers\Api\SearchController;
 use Illuminate\Support\Facades\Route;
@@ -65,4 +67,17 @@ Route::middleware('auth:sanctum')->prefix('cart')->group(function (): void {
     Route::get('/', [CartController::class, 'index']);
     Route::post('items', [CartController::class, 'store']);
     Route::delete('items/{offer}', [CartController::class, 'destroy'])->whereNumber('offer');
+});
+
+/**
+ * Checkout and order history — signed-in only.
+ *
+ * WHY: the whole group sits behind auth:sanctum. CheckoutService owns the
+ * payment/key transaction and OrderService scopes every order lookup to the
+ * authenticated user, so no client-supplied user or order ownership is trusted.
+ */
+Route::middleware('auth:sanctum')->group(function (): void {
+    Route::post('checkout', [CheckoutController::class, 'store']);
+    Route::get('orders', [OrderController::class, 'index']);
+    Route::get('orders/{order}', [OrderController::class, 'show'])->whereNumber('order');
 });

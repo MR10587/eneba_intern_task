@@ -1,4 +1,4 @@
-# API contract — Catalog + Authentication + Search + Homepage + Cart slices (Phase 2)
+# API contract — Catalog + Authentication + Search + Homepage + Cart + Checkout/Orders slices (Phase 2)
 
 Base URL: `http://127.0.0.1:8000/api` (Vite proxies `/api` to this during development).
 
@@ -12,12 +12,13 @@ Implemented:
 - `GET /cart` (token required)
 - `POST /cart/items` (token required)
 - `DELETE /cart/items/{offer}` (token required)
+- `POST /checkout` (token required)
+- `GET /orders` (token required)
+- `GET /orders/{id}` (token required)
 - `POST /auth/register`
 - `POST /auth/login`
 - `POST /auth/logout` (token required)
 - `GET /auth/me` (token required)
-
-Checkout and orders are **not implemented yet**.
 
 All prices are **integer cents in EUR**. The `currency` field is always `"EUR"`.
 The client must format cents for display; it must never compute or alter prices.
@@ -41,14 +42,16 @@ The client must format cents for display; it must never compute or alter prices.
 | Code | Status | Where |
 | --- | --- | --- |
 | `VALIDATION_ERROR` | 422 | Endpoints with request bodies/parameters |
-| `PRODUCT_NOT_FOUND` | 404 | Catalog detail, cart add |
-| `OFFER_NOT_FOUND` | 404 | Cart add |
-| `NOT_FOUND` | 404 | Cart delete |
-| `INSUFFICIENT_INVENTORY` | 409 | Cart add when the offer is inactive or sold out |
+| `PRODUCT_NOT_FOUND` | 404 | Catalog detail, cart add, checkout |
+| `OFFER_NOT_FOUND` | 404 | Cart add, checkout |
+| `NOT_FOUND` | 404 | Cart delete, order detail |
+| `INSUFFICIENT_INVENTORY` | 409 | Cart add/checkout when an offer is inactive or its keys are sold out |
+| `PAYMENT_FAILED` | 402 | Checkout with the simulated declined card |
 | `INVALID_CREDENTIALS` | 401 | Login |
 | `UNAUTHENTICATED` | 401 | Protected routes without a valid token |
 
-`PAYMENT_FAILED` (402) and `FORBIDDEN`/`INTERNAL_ERROR` are reserved for later slices.
+`FORBIDDEN` and `INTERNAL_ERROR` remain reserved; order ownership failures use
+`NOT_FOUND` so one user cannot detect another user's order IDs.
 
 ## `GET /products/filters`
 
@@ -348,7 +351,7 @@ Returns the same `user` object shown above, directly under `data` (no token fiel
 
 ### Missing or invalid token
 
-Applies to `logout`, `me`, and all cart endpoints:
+Applies to `logout`, `me`, all cart endpoints, and all checkout/order endpoints:
 
 ```json
 { "message": "Authentication is required.", "code": "UNAUTHENTICATED" }
@@ -411,3 +414,137 @@ Validation of the two IDs uses the shared `422 VALIDATION_ERROR` envelope.
 Deletes that offer from the current user's cart only and returns `200` with the
 updated cart. An offer that is not in this user's cart returns
 `404 NOT_FOUND`; another user's item is indistinguishable from a missing one.
+
+## Checkout — token required
+
+Checkout runs in one DB transaction. The prices are recomputed from the current
+persisted `offers.price_cents`; no client-supplied price or total is accepted.
+All cart items are revalidated against live state, so a stale cart item cannot
+buy an inactive product or a sold-out offer.
+
+The payment is simulated. A card number ending in `0002` returns
+`402 PAYMENT_FAILED` before any write happens: no order row, no order item, no
+sold key, and the cart is unchanged. A successful payment stores only the
+masked last 4 digits in `payment_reference`; the full card number is never
+persisted or logged.
+
+### `POST /checkout`
+
+Body: `{ "card_number": "4242 4242 4242 4242" }`.
+
+`card_number` is required, must be a string of 13–19 digits after spaces and
+dashes are stripped, and is never sent to a payment provider.
+
+`201` response:
+
+```json
+{
+  "data": {
+    "id": 7,
+    "order_id": 7,
+    "status": "completed",
+    "total_cents": 2998,
+    "currency": "EUR",
+    "payment_status": "succeeded",
+    "payment_reference": "SIM-A1B2C3D4-4242",
+    "created_at": "2026-11-24T21:30:00.000000Z",
+    "items": [
+      {
+        "id": 12,
+        "offer_id": 3,
+        "product_id": 2,
+        "product": { "id": 2, "slug": "minecraft", "name": "Minecraft" },
+        "region": "Europe",
+        "quantity": 1,
+        "unit_price_cents": 1999,
+        "line_total_cents": 1999,
+        "digital_key": { "code": "KEY-ABCD-EFGH-IJKL" }
+      },
+      {
+        "id": 13,
+        "offer_id": 9,
+        "product_id": 8,
+        "product": { "id": 8, "slug": "among-us", "name": "Among Us" },
+        "region": "Global",
+        "quantity": 1,
+        "unit_price_cents": 999,
+        "line_total_cents": 999,
+        "digital_key": { "code": "KEY-MNOP-QRST-UVWX" }
+      }
+    ]
+  },
+  "meta": { "keys_delivered": 2 }
+}
+```
+
+On success, the order is created before its items, one available key per line
+is marked `sold` (lowest key ID first), the paid cart lines are removed, and
+the cart remains available for future purchases.
+
+Errors:
+
+- Empty cart or non-EUR/mixed currency → `422 VALIDATION_ERROR` with `errors.cart`.
+- Invalid card number → `422 VALIDATION_ERROR` with `errors.card_number`.
+- Card ending in `0002` → `402 PAYMENT_FAILED` with no order or key mutation.
+- Inactive/missing product → `404 PRODUCT_NOT_FOUND`.
+- Inactive offer or no available key → `409 INSUFFICIENT_INVENTORY`.
+
+## Orders — token required
+
+Every order lookup is scoped to the authenticated user. A missing order and
+another user's order both return `404 NOT_FOUND`; there is deliberately no
+`403 FORBIDDEN` response for ownership failures.
+
+### `GET /orders`
+
+Query parameters: `page` (`>= 1`, default `1`) and `per_page` (`1–48`, default
+`12`). Orders are newest first.
+
+The list includes purchased product summaries and purchase dates for order
+history. Delivered key codes are omitted here; they appear only in checkout
+and order detail responses.
+
+```json
+{
+  "data": [
+    {
+      "id": 7,
+      "order_id": 7,
+      "status": "completed",
+      "total_cents": 2998,
+      "currency": "EUR",
+      "payment_status": "succeeded",
+      "payment_reference": "SIM-A1B2C3D4-4242",
+      "created_at": "2026-11-24T21:30:00.000000Z",
+      "items": [
+        {
+          "id": 12,
+          "offer_id": 3,
+          "product_id": 2,
+          "product": { "id": 2, "slug": "minecraft", "name": "Minecraft" },
+          "region": "Europe",
+          "quantity": 1,
+          "unit_price_cents": 1999,
+          "line_total_cents": 1999
+        }
+      ]
+    }
+  ],
+  "meta": {
+    "pagination": {
+      "current_page": 1, "per_page": 12, "total": 1,
+      "last_page": 1, "from": 1, "to": 1
+    }
+  }
+}
+```
+
+### `GET /orders/{id}`
+
+Returns the same order shape with `digital_key.code` on each item, so the SPA
+can display purchased keys from order history. `{id}` must be numeric; a
+missing id or another user's id returns:
+
+```json
+{ "message": "The requested resource was not found.", "code": "NOT_FOUND" }
+```

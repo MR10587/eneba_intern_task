@@ -91,6 +91,16 @@ class ApiException extends Exception
         );
     }
 
+    public static function paymentFailed(): self
+    {
+        return new self(
+            ErrorCode::PaymentFailed,
+            ErrorCode::PaymentFailed->defaultMessage(),
+            [],
+            ErrorCode::PaymentFailed->status(),
+        );
+    }
+
     public static function notFound(): self
     {
         return new self(
