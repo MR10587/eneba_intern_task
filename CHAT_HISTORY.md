@@ -509,3 +509,55 @@ Filled two requirement gaps found in the audit:
 2. Phase 1's enumerated statuses and positive quantity are not DB CHECK constraints: Laravel 13's `Blueprint` exposes no `check()` method. Documented that Phase 2 FormRequests will enforce them.
 
 Updated `AGENTS.md` with an explicit "Phase 0/1 audit" section, the Docker/Sail deviation (`DB_HOST=127.0.0.1` instead of `pgsql`), the linter rationale, and the added verification commands.
+
+---
+
+## User
+
+> Review the Phase 2 plan against the project requirements and the decisions we have already confirmed. Do not modify any repository files yet... propose the exact Catalog API contract... End with a short list of decisions that require my approval.
+
+Reviewed the Phase 2 plan and identified seven confirmation points: USD vs EUR, quantity = 1, `/products/filters` necessity, response/error envelope, checkout locking/key allocation/payment failure, and `relevance` sort ambiguity. Found three concrete defects in my own checkout plan: `order_items` created before the parent `order` (FK violation), no failed-order record despite `plan.md` defining a `failed` status, and key availability checked before acquiring the lock. Proposed the full catalog contract with query params, JSON examples, filter/sort semantics, pagination defaults (12 / max 48), and validation errors.
+
+## User
+
+> 1- make currency euro 7- remove others accepted
+
+Approved all decisions with two changes: currency EUR, and remove the `PATCH /cart/items/{offer}` route entirely.
+
+## User
+
+> start
+
+Implemented the **catalog slice only** (no auth, search, home, cart, checkout, orders, frontend, or seed data).
+
+Foundation: `app/Enums/ErrorCode.php` (stable codes + HTTP status mapping), `app/Exceptions/ApiException.php` (named constructors; deliberately uses `$errorCode` to avoid clashing with `Exception::$code`), `app\Support\ApiResponse.php` (`{data, meta}` / `{message, code, errors?}`), `app\Http\Requests\Api\ApiFormRequest.php` (422 coded failures), `JsonResource::withoutWrapping()` in `AppServiceProvider`, coded render callbacks in `bootstrap/app.php` guarded by `$request->is('api/*')`, and `config/catalog.php` (EUR + pagination defaults).
+
+Migration `2026_11_24_150000_change_currency_defaults_to_eur.php` changed `offers` / `orders` currency defaults from USD to EUR with a non-destructive `change()`; applied via `artisan migrate --force`. No `migrate:fresh`, no resets, no data deletion.
+
+Routes in `routes/api.php` (filters declared before `{slug}`): `GET /api/products/filters`, `GET /api/products`, `GET /api/products/{slug}`.
+
+`CatalogService` computes `min_price_cents` and `available_offer_count` via correlated subqueries over active offers that have at least one `available` key, wraps the query with `fromSub()` so price filters can compare the computed alias, puts NULL prices last in both price sorts, and aliases `relevance` to popularity. `findBySlug()` throws `PRODUCT_NOT_FOUND` for missing/inactive products and includes all active offers (with a `withCount` availability flag) ordered by price then region. Resources: `ProductResource` (works for both list rows and detail model, computes discount %), `OfferResource`, `SellerResource`. `ProductIndexRequest` validates params and cross-checks `min_price <= max_price` in `after()`.
+
+Added factories for Product, Seller, Offer, DigitalKey; `tests/Feature/Api/CatalogTest.php` (10 tests) and `tests/Feature/Api/ProductTest.php` (4 tests).
+
+Commands and results:
+
+```
+& 'C:\php\php.exe' artisan migrate --force --no-interaction   # EUR migration DONE
+& 'C:\php\php.exe' artisan route:list --path=api              # 3 catalog routes
+& 'C:\php\php.exe' artisan test                               # 16 passed, 88 assertions
+& 'C:\php\php.exe' vendor/bin/pint bootstrap/app.php          # fixed style
+& 'C:\php\php.exe' vendor/bin/pint --test                     # passed
+```
+
+Created `docs/api-contract.md` with the catalog contract. Updated `AGENTS.md` (new phase state, approved decisions, verified commands) and the plan file at `C:\Users\ramal\.opencode\plan\phase2-backend-api.md` (EUR, no PATCH route, checkout corrections).
+
+All new PHP files include explanatory docblocks, and non-obvious logic has `// WHY:` comments as requested.
+
+## User
+
+> 1 (run the temporary-data check, then clean up)
+
+Created one temporary Minecraft product with two offers (Europe 1999 with an available key, Global 1499 with a sold key), queried the live endpoints, then deleted exactly those rows by recorded ID. Results: list showed `min_price_cents: 1999` (not 1499), `discount_percent: 33`, `available: true`, `available_offer_count: 1`; detail showed both offers with the 1499 one `available: false`; `min_price=1400&max_price=1600` returned no products; filters returned only Steam / Europe / 1999.
+
+**Bug found by the manual check:** the detail endpoint returned `min_price_cents: null` and `discount_percent: null` while `available: true`, because `findBySlug()` returns a plain Product model without the list query's computed columns. Fixed `CatalogService::findBySlug()` to derive `min_price_cents` from the cheapest available loaded offer and set `available_offer_count` from the same filtered collection. Added assertions to `ProductTest::test_product_detail_returns_seller_offers_with_availability` plus a new `test_sold_out_product_detail_has_null_price_and_no_discount`. Re-verified live then cleaned up: products=0, sellers=0, offers=0, keys=0. Final suite: 17 passed, 98 assertions; Pint passed. Updated AGENTS.md counts accordingly.

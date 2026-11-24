@@ -4,7 +4,8 @@
 
 - Laravel backend scaffolded at the repo root: skeleton `v13.0.0`, framework `v13.43.0`. Existing docs (`SPEC.md`, `AGENTS.md`, `CHAT_HISTORY.md`, `plan.md`) were preserved.
 - Separate `frontend/` Vite + React + TypeScript SPA is scaffolded; Laravel root remains API-only.
-- Sanctum is installed (`personal_access_tokens` table, `HasApiTokens` on `User`). Domain schema and models exist: products, sellers, offers, digital_keys, carts, cart_items, orders, order_items, homepage_blocks. No controllers, business logic, or API endpoints yet.
+- Sanctum is installed (`personal_access_tokens` table, `HasApiTokens` on `User`). Domain schema and models exist: products, sellers, offers, digital_keys, carts, cart_items, orders, order_items, homepage_blocks.
+- Phase 2 catalog slice implemented: `GET /api/products/filters`, `GET /api/products`, `GET /api/products/{slug}`, with coded/error envelopes, EUR cents, backend-computed prices, and 14 feature tests. Auth/search/home/cart/checkout/orders are not implemented yet.
 - `SPEC.md` is the product source of truth; `plan.md` is the implementation plan.
 
 ## Windows environment (verified 2026-11-24)
@@ -26,13 +27,23 @@
 - `minecraft` / `minec` trigram scores and `ILIKE` hits verified; `mincraft` has similarity ~0.583 but no `ILIKE` hit, which is why Phase 2 search must rank by similarity rather than rely on `ILIKE` alone.
 - Laravel 13's `Blueprint` has no `check()` method. Enumerated statuses (`available`/`sold`, `pending`/`completed`/`failed`) and `quantity > 0` are therefore enforced by FormRequest validation in Phase 2, not DB CHECK constraints.
 
+## Phase 2 decisions (user-approved)
+
+- Currency is **EUR**, stored and returned as integer cents; `config/catalog.php` holds the currency and pagination defaults. A non-destructive migration changed `offers` / `orders` currency defaults from USD to EUR.
+- Cart quantity is always 1 per offer and the `PATCH /cart/items/{offer}` route was **removed**.
+- Filter options come from `GET /products/filters`; `relevance` sort aliases `popularity` on the catalog endpoint.
+- Checkout (later): no order row at all on payment failure; create the order before order items; re-check key status after `lockForUpdate()`.
+
 ## Verified commands (PowerShell)
 
 - `& 'C:\php\php.exe' artisan --version` → `Laravel Framework 13.43.0`
-- `& 'C:\php\php.exe' artisan test` → 2 passed (default Laravel tests)
+- `& 'C:\php\php.exe' artisan test` → 17 passed, 98 assertions (2 defaults + 15 catalog tests)
+- `& 'C:\php\php.exe' artisan route:list --path=api` → three catalog routes registered
+- `& 'C:\php\php.exe' vendor/bin/pint --test` → passed
 - `& 'C:\php\php.exe' artisan migrate:status` → all migrations Ran; `artisan db:show` → PostgreSQL 18.6 / `eneba_store`
 - `& 'C:\php\php.exe' artisan install:api --no-interaction` → Sanctum v4.5.0 installed and its migration ran
 - `& 'C:\php\php.exe' artisan migrate --force` → 10 domain migrations applied; `pg_trgm` extension and `products_name_trgm_idx` verified present in PostgreSQL
+- `2026_11_24_150000_change_currency_defaults_to_eur` applied with `artisan migrate --force` (non-destructive default change; no data reset)
 - `& 'C:\php\php.exe' artisan migrate:fresh --seed --force --no-interaction` → succeeds on PostgreSQL; `$env:DB_CONNECTION='sqlite'; $env:DB_DATABASE=':memory:'; & 'C:\php\php.exe' artisan migrate:fresh --force` → succeeds on SQLite
 - `$env:PATH = 'C:\php;' + $env:PATH; & 'C:\ProgramData\ComposerSetup\bin\composer.bat' check-platform-reqs` → all requirements satisfied
 - `& 'C:\php\php.exe' artisan serve` and `npm run dev` in `frontend/` — both confirmed working by the user.
