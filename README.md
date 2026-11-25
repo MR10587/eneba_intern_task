@@ -4,6 +4,15 @@ A full-stack demo storefront built with a Laravel 13 API and a separate React 19
 
 Payments are simulated only. Cards ending in `0002` fail intentionally; no real payment provider is used.
 
+## Live demo
+
+| Service | URL |
+| --- | --- |
+| Storefront (Vercel) | https://eneba-intern-task-j2nhj19po-mr10587s-projects.vercel.app/ |
+| API (Render) | https://eneba-marketplace-api-r536.onrender.com/ |
+
+The API health check is at `https://eneba-marketplace-api-r536.onrender.com/up`. Free-tier services can sleep after inactivity, so the first request may take a moment to wake them. Use the demo credentials and test cards listed below.
+
 ## Layout
 
 | Path                                                 | Purpose                                                              |
@@ -142,7 +151,7 @@ All money values are integer cents in EUR. See `docs/api-contract.md` for full s
 
 ## Deployment
 
-See `DEPLOYMENT.md` for the Render (Docker) + Neon (PostgreSQL) + Vercel (Vite) setup, required dashboard variables, and verification steps. No secrets are stored in this repository.
+The deployed setup is Vercel (React/Vite SPA) → Render (Laravel API in Docker) → Neon (PostgreSQL). The live storefront and API URLs are listed under **Live demo** above. See `DEPLOYMENT.md` for the hosting steps, required dashboard variables, and verification checklist. No secrets are stored in this repository.
 
 ## Implementation notes
 
