@@ -19,6 +19,8 @@ npm run preview
 
 `npm run dev` starts on port `5173`. Requests to `/api/*` are proxied to `http://127.0.0.1:8000`, so the Laravel server must be running for the storefront and all data-driven pages.
 
+For a deployed SPA, set `VITE_API_URL` to the full API base including `/api` (for example `https://YOUR_API_SERVICE.onrender.com/api`). With that variable unset, local development keeps the `/api` proxy. See `../DEPLOYMENT.md` for the full hosting setup.
+
 ## Routes
 
 | Route                 | Purpose                                               | Auth |

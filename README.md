@@ -140,6 +140,10 @@ Current verified results: **77 backend tests / 582 assertions**, Pint passed, **
 
 All money values are integer cents in EUR. See `docs/api-contract.md` for full shapes and coded errors.
 
+## Deployment
+
+See `DEPLOYMENT.md` for the Render (Docker) + Neon (PostgreSQL) + Vercel (Vite) setup, required dashboard variables, and verification steps. No secrets are stored in this repository.
+
 ## Implementation notes
 
 - Sanctum personal access tokens are stored in the browser under `eneba_token`.

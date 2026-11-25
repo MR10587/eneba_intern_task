@@ -1,10 +1,14 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { jsonResponse } from '../test/fixtures'
 import { ApiError, apiFetch, getAuthToken, setAuthToken } from './client'
 
 describe('apiFetch', () => {
     beforeEach(() => {
         setAuthToken(null)
+    })
+
+    afterEach(() => {
+        vi.unstubAllEnvs()
     })
 
     it('returns JSON, prefixes /api, and sends an explicit bearer token', async () => {
@@ -86,5 +90,18 @@ describe('apiFetch', () => {
 
         expect(error).toBeInstanceOf(ApiError)
         expect((error as ApiError).code).toBe('INTERNAL_ERROR')
+    })
+
+    it('uses VITE_API_URL when the SPA is deployed separately', async () => {
+        vi.stubEnv('VITE_API_URL', 'https://api.example.test/api/')
+        vi.resetModules()
+
+        const { apiFetch: deployedFetch } = await import('./client')
+        const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ data: { ok: true } }))
+        vi.stubGlobal('fetch', fetchMock)
+
+        await deployedFetch('/home')
+
+        expect(fetchMock.mock.calls[0]?.[0]).toBe('https://api.example.test/api/home')
     })
 })

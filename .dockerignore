@@ -1,0 +1,21 @@
+.git
+.env
+.env.*
+!.env.example
+
+vendor
+node_modules
+
+# The API image does not build or serve the SPA.
+frontend
+
+bootstrap/cache/*.php
+storage/*.key
+storage/pail
+storage/logs/*.log
+
+.phpunit.cache
+.phpunit.result.cache
+*.log
+.DS_Store
+Thumbs.db

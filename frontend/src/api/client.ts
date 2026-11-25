@@ -1,6 +1,12 @@
 import type { ApiErrorPayload } from '../types/api'
 
-export const API_BASE = '/api'
+/**
+ * Local development keeps the Vite `/api` proxy. Deployments set VITE_API_URL
+ * to the full API base, including `/api`, because the SPA is served separately.
+ */
+const configuredApiBase = import.meta.env.VITE_API_URL?.trim()
+
+export const API_BASE = configuredApiBase ? configuredApiBase.replace(/\/+$/, '') : '/api'
 
 const TOKEN_STORAGE_KEY = 'eneba_token'
 
