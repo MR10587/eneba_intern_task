@@ -8,7 +8,7 @@ Payments are simulated only. Cards ending in `0002` fail intentionally; no real 
 
 | Service | URL |
 | --- | --- |
-| Storefront (Vercel) | https://eneba-intern-task-j2nhj19po-mr10587s-projects.vercel.app/ |
+| Storefront (Vercel) | https://eneba-intern-task.vercel.app/ |
 | API (Render) | https://eneba-marketplace-api-r536.onrender.com/ |
 
 The API health check is at `https://eneba-marketplace-api-r536.onrender.com/up`. Free-tier services can sleep after inactivity, so the first request may take a moment to wake them. Use the demo credentials and test cards listed below.
