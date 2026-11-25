@@ -16,6 +16,7 @@ Full log of the session that produced `AGENTS.md`.
 > ## How to investigate
 >
 > Read the highest-value sources first:
+>
 > - `README*`, root manifests, workspace config, lockfiles
 > - build, test, lint, formatter, typecheck, and codegen config
 > - CI workflows and pre-commit / task runner config
@@ -29,6 +30,7 @@ Full log of the session that produced `AGENTS.md`.
 > ## What to extract
 >
 > Look for the highest-signal facts for an agent working in this repo:
+>
 > - exact developer commands, especially non-obvious ones
 > - how to run a single test, a single package, or a focused verification step
 > - required command order when it matters, such as `lint -> typecheck -> test`
@@ -44,6 +46,7 @@ Full log of the session that produced `AGENTS.md`.
 > Only ask the user questions if the repo cannot answer something important. Use the `question` tool for one short batch at most.
 >
 > Good questions:
+>
 > - undocumented team conventions
 > - branch / PR / release expectations
 > - missing setup or test prerequisites that are known but not written down
@@ -53,6 +56,7 @@ Full log of the session that produced `AGENTS.md`.
 > ## Writing rules
 >
 > Include only high-signal, repo-specific guidance such as:
+>
 > - exact commands and shortcuts the agent would otherwise guess wrong
 > - architecture notes that are not obvious from filenames
 > - conventions that differ from language or framework defaults
@@ -60,6 +64,7 @@ Full log of the session that produced `AGENTS.md`.
 > - references to existing instruction sources that matter
 >
 > Exclude:
+>
 > - generic software advice
 > - long tutorials or exhaustive file trees
 > - obvious language conventions
@@ -85,14 +90,14 @@ Read `SPEC.md` (47 lines) and checked git state in parallel.
 `SPEC.md` contents:
 
 - Goals: a website where users buy video game keys.
-  - Store: catalog of every product, filters (platform, region, price), sorting, search by name.
-  - Homepage: landing page assembled from blocks (banner, best sellers, deals); each block gets content from its own backend service or database — nothing hardcoded in the frontend.
-  - Search: product name search from anywhere in the app, coping with typos and partial names.
-  - Product page: details and offers from several sellers for comparison.
-  - Checkout: cart, pay, receive digital key; simulated payment or provider test mode; no real money.
-  - Authentication: create account / sign in; checkout and order history signed-in only.
-  - Eneba styling: colors, typography, spacing, components follow the design reference.
-  - Full-Flow: Homepage/Search → Product page → Adding to cart → Checkout (sign in required) → Payment → Order and key (Final), Eneba styles everywhere.
+    - Store: catalog of every product, filters (platform, region, price), sorting, search by name.
+    - Homepage: landing page assembled from blocks (banner, best sellers, deals); each block gets content from its own backend service or database — nothing hardcoded in the frontend.
+    - Search: product name search from anywhere in the app, coping with typos and partial names.
+    - Product page: details and offers from several sellers for comparison.
+    - Checkout: cart, pay, receive digital key; simulated payment or provider test mode; no real money.
+    - Authentication: create account / sign in; checkout and order history signed-in only.
+    - Eneba styling: colors, typography, spacing, components follow the design reference.
+    - Full-Flow: Homepage/Search → Product page → Adding to cart → Checkout (sign in required) → Payment → Order and key (Final), Eneba styles everywhere.
 - Non-Goals: real payment system; AI integration; no hardcoded data in frontend.
 - Inputs/examples: filter `Platform = Steam, Region = Europe, Price_Range = 0 - 10$`; search `Minecraft/Minec/mincraft` (autocomplete/fix "maybe, not in mvp"); register/login with email + password; "Card operations: Required card operations".
 - Outputs: homepage data (best sellers, deals), product catalog (pagination), search results, filter results, product details.
@@ -241,18 +246,21 @@ Copied `C:\Users\ramal\.opencode\plan\plan.md` to the repository root as `plan.m
 > We are continuing Phase 0.1 of the Eneba marketplace project.
 >
 > Environment:
+>
 > - Windows 11
 > - PHP is installed at C:\php\php.exe
 > - Composer is installed
 > - Docker Desktop is not installed
 >
 > Before making changes:
+>
 > 1. Read SPEC.md and AGENTS.md completely.
 > 2. Inspect the repository and preserve all existing files.
 > 3. Verify PHP and Composer availability.
 > 4. Check required PHP extensions for Laravel.
 >
 > Then:
+>
 > - Initialize a Laravel backend at the repository root if it does not already exist.
 > - Choose a stable Laravel version compatible with the installed PHP version.
 > - Do not initialize React yet.
@@ -330,6 +338,7 @@ Appended this Phase 0.1 record to `CHAT_HISTORY.md`.
 ## User
 
 > We have completed Phase 0.1:
+>
 > - Laravel 13.43.0 installed at the repository root.
 > - PHP 8.5.9 and Composer 2.11.2 work.
 > - PostgreSQL 18 is running.
@@ -338,6 +347,7 @@ Appended this Phase 0.1 record to `CHAT_HISTORY.md`.
 > - The repository root already contains a `package.json`.
 >
 > Before making any changes, inspect:
+>
 > 1. The root `package.json`.
 > 2. The root `vite.config.js` (if present).
 > 3. Whether Node.js and npm are installed and their versions.
@@ -584,3 +594,98 @@ Implemented the auth slice:
 One test initially failed: after logout, the revoked token still returned 200 on `/me`. Investigation of `vendor/laravel/sanctum/src/Guard.php` and `Illuminate\Auth\RequestGuard` showed the cause is test-only: the RequestGuard caches the resolved user for the app instance's lifetime, and feature tests reuse that instance. Added `Auth::forgetGuards()` in the test with a `// WHY:` comment to simulate a fresh HTTP request. All 10 auth tests then passed without any production change.
 
 Updated `docs/api-contract.md` with the auth contract, plus `AGENTS.md` and `CHAT_HISTORY.md`. No migrations and no destructive DB commands.
+
+## User
+
+> now check frontend slice 1 completely to make sure it is ready and if it does not have problems, go into second slice
+
+Audited the frontend against `SPEC.md`, `plan.md`, `AGENTS.md`, and the API contract. The API-backed public pages were clean, but the root route had become an isolated mock showcase: `/` no longer called `GET /home`, product cards lacked a `/products/:slug` destination, and no component used the existing auth/cart/checkout/order endpoints. Because the purple mock storefront was explicitly requested in the preceding turn, it was treated as intentional and kept isolated rather than deleted.
+
+Implemented Phase 3 slice 2 — the authenticated purchase flow — without changing the backend:
+
+- `api/client.ts` now hydrates and persists the Sanctum token in `localStorage` under `eneba_token`; `getAuthToken()` exposes it to the app.
+- Added `context/AuthProvider.tsx` + `context/authContext.ts`, a `RequireAuth` route guard, and coded-error message helpers in `utils/errors.ts`.
+- Added a shared purple `StoreShell` with live `/api` search, cart badge from `GET /cart`, account/orders/logout controls, and routes into the API pages.
+- Added `ProductDetailPage` with `/products/:slug` seller offers and add-by-`product_id`/`offer_id`; `CartPage` with API line totals and removal; `LoginPage`/`RegisterPage`; `CheckoutPage` with the simulated card form and `0002` failure path; `OrderConfirmationPage` (`OrderDetailPage`) with delivered keys; and `OrderHistoryPage`.
+- `App.tsx` now mounts all of the above with guards on `/cart`, `/checkout`, and `/orders*`. The root mock marketplace remains available at `/`, with new links to the live store and sign-in.
+- Added fixtures and tests for guard redirect, login submit/redirect, offer add, cart remove, checkout success/failure, order confirmation/key delivery, and order history.
+
+Final frontend verification: `typecheck`, `test` (30 tests across 14 files), `lint`, `format:check`, and `build` all pass. Updated `AGENTS.md` and `plan.md` so the mock-root exception and slice 2 status are explicit. No backend files were changed in this step and nothing was committed.
+
+## User
+
+> change website name from keyverse to eneba
+
+Renamed the frontend display name from Keyverse to Eneba across `index.html`, both header/nav shells, `Footer`, `AuthForm`, `CoverArt`, `aria-label`s, test expectations, and the Sanctum token storage key (`eneba_token`). Updated `AGENTS.md`, `plan.md`, and this history so the earlier "no Eneba branding" note now reflects the explicit rename request while still avoiding copied logo/artwork assets. No backend changes.
+
+## User
+
+> continue with the next step
+
+Completed the Phase 5/6 handoff step. Re-ran the full backend suite with native PHP: 77 tests / 582 assertions passed, Pint passed, and `route:list --path=api` showed 15 routes. Replaced the stock Laravel `README.md` and Vite `frontend/README.md` with project-specific setup, env vars, native Windows commands, demo credentials, the `0002` test-card rule, route maps, architecture notes, and verification commands. Set `APP_NAME=Eneba` in `.env.example`, formatted both READMEs with Prettier, and re-checked frontend formatting. Updated `AGENTS.md`, `plan.md`, and this history. No application logic changed.
+
+## User
+
+> do next step
+
+With all plan phases complete, addressed the remaining audit polish items. `CartDrawer` now focuses the close button on open, traps Tab inside the dialog, locks body scroll, restores the previously focused element on close, and handles Escape through a ref so inline `onClose` callbacks do not restart the effect. `CategoryBar` uses `aria-pressed` instead of `aria-current="page"` because the buttons are filters. `CatalogFilters` clamps min/max price changes so the API never receives `min_price > max_price`. Updated stale `docs/api-contract.md` wording about homepage seed configuration and removed unused Vite template assets (`App.css`, `src/assets/`). Added tests for drawer focus/Escape and price clamping. Frontend verification: typecheck, lint, format, build, and 32 tests across 15 files pass. Updated `AGENTS.md`, root `README.md`, and this history.
+
+## User
+
+> when user clicks on add to card, there must be notification on screen showing it is added to checkout
+
+Added an app-wide toast system so cart feedback is visible on every add-to-cart path. New `context/toastContext.ts`, `context/ToastProvider.tsx`, and `components/ui/ToastViewport.tsx` provide accessible `role="status"` notifications with success/error tones, manual dismiss, four-second auto-dismiss, and an optional action button. `ToastProvider` wraps all routes in `App.tsx`. The mock marketplace now shows “<game> added to cart. Ready for checkout.” with a `View cart` action that opens the drawer; the API product detail page shows the same confirmation while navigating to `/cart`. Test helpers and marketplace/detail tests were updated to include the provider and assert the notification. Updated `AGENTS.md` and `frontend/README.md`.
+
+## User
+
+> Games Gift Cards Top-Ups Hardware Best Deals when user clicks on that buttons at the top of page automatically slide down to marketplace
+
+Added a shared `selectCategory` handler in `MarketplacePage` that updates the active category and smooth-scrolls to the `#marketplace` section (`behavior: 'smooth'`, `block: 'start'`). Wired the top `Navbar` category bar, `HeroGrid` CTAs, and `Footer` category links to it so all five selectors behave consistently. Added a test that selects Gift Cards from the top category nav and asserts the marketplace section receives the scroll call. Updated `AGENTS.md`, root `README.md`, and `frontend/README.md`; frontend suite is now 33 tests across 15 files.
+
+## User
+
+> make the root marketplace live: load real backend products and home blocks, remove the wishlist control, and use the real API cart when adding live products
+
+Replaced the isolated mock storefront at `/` with an API-backed purple marketplace. `GET /home` now supplies the banner and collection highlights; `GET /products` and `GET /search` supply the live grid; `GET /products/filters` supplies platform, region, and price options. `MarketplaceProductCard`, `ProductGrid`, `FilterSidebar`, `HeroGrid`, `Navbar`, `Footer`, and `CartDrawer` were rewritten around backend DTOs, and `data/games.ts` was deleted. Adding a product resolves the first available seller offer through `GET /products/:slug`, posts to `POST /cart/items`, reloads `GET /cart`, and shows the existing toast with a `View cart` action; unauthenticated adds show a sign-in action. The heart/wishlist control was removed. Category labels and deterministic cover gradients are presentation-only.
+
+Rewrote the marketplace tests around home/filters/catalog/search/product-detail/cart requests, including live add-to-cart, API drawer totals, category scrolling, and absence of a wishlist button. Updated `App.test.tsx`, `renderAuth.tsx` token derivation, `AGENTS.md`, `plan.md`, and both READMEs so the mock-root exception is gone.
+
+Final verification: backend `artisan test` 77 passed / 582 assertions and Pint passed. Frontend `typecheck`, `npm test` (33 tests across 15 files), `oxlint`, `format:check`, and `build` all passed. Nothing was committed.
+
+## User
+
+> 1- fix filters and add extra seed data  2- they should return 422 validation error 3- add tests for testing mincraft checking for postgresql 4- if /card contains unavailable games, show it on cart screen and do not let user to go checkout page 5- change plan files to only contain current features
+
+Implemented all five fixes. Added a `products.category` column with a migration and moved category filtering into `CatalogService`; `Best Deals` is derived from backend price columns, and `/search` now accepts the same category/platform/region/price filters before pagination. The root marketplace sends those filters to the API and no longer slices a fetched page. Extended deterministic seeds with 7 gift-card/top-up/hardware products (39 products, 98 offers, 401 keys total) and added backend/frontend tests for backend filtering, filtered search, and the new shelves.
+
+Guarded email normalisation in `RegisterRequest` and `LoginRequest` with `is_string()` so array payloads produce coded `422 VALIDATION_ERROR` instead of a PHP warning; added an auth test covering both endpoints. Added `tests/Feature/Api/PostgresSearchTest.php` with PHPUnit attributes and `phpunit.pgsql.xml` (plus `composer test:pgsql`) so `Minecraft`, `Minec`, and `mincraft` are verified on PostgreSQL while default SQLite runs skip cleanly. A nested savepoint in the key-uniqueness test keeps the PostgreSQL suite transaction-safe.
+
+Cart and cart drawer now name unavailable lines and disable checkout; direct `/checkout` visits with a stale line redirect back to `/cart`. Added frontend tests for both behaviours. Rewrote `plan.md` as a current implementation record with native commands only, removed stale Docker/Sail/PATCH guidance, and updated `docs/api-contract.md`, both READMEs, and `AGENTS.md` to match.
+
+Final verification: backend SQLite suite 83 passed / 3 skipped / 639 assertions; PostgreSQL suite 86 passed / 654 assertions; Pint and Composer validation passed. Frontend typecheck, 36 tests across 15 files, oxlint, Prettier, and build all passed. Applied the new migration and idempotent seed to the local `eneba_store` database. Nothing was committed.
+
+## User
+
+> not show from the api text in frontend, and do not show unavailable products in marketplace
+
+Replaced all customer-facing copy that mentioned the API or backend with natural storefront wording: hero badges and counts, home intro, footer, catalog/search descriptions, product detail availability, cart totals, and order history. Those terms now remain only in code comments, tests, and developer documentation.
+
+Catalog, search, and homepage resolvers now exclude products with no purchasable offer, while product detail still shows sold-out offers and stale cart lines remain visible. The SPA also filters defensively before rendering marketplace, catalog, search, and home grids. Added backend tests for hidden sold-out catalog/search/home products and frontend tests for hidden marketplace/home products. Updated `plan.md`, `docs/api-contract.md`, and `AGENTS.md` to match.
+
+Final verification: backend SQLite suite 84 passed / 3 skipped / 645 assertions; PostgreSQL suite 87 passed / 660 assertions; Pint passed. Frontend typecheck, 38 tests across 15 files, oxlint, Prettier, and build all passed. Nothing was committed.
+
+## User
+
+> minecraft is recomended as featured game, but it is unavailable, add condition for featured game, it must be available
+
+Made featured-game availability a backend invariant. `BannerBlockResolver` now asks `CatalogService` for the configured slug only while it is purchasable; if it is missing, inactive, or sold out, the most popular available product is featured instead and `cta_href` follows that product. With no purchasable product at all, the banner returns `product: null` and no CTA, and both the home page and marketplace hide it. Replaced the seeded Minecraft-specific headline with generic copy. Added backend coverage for sold-out fallback and frontend coverage for hiding unavailable banners. Updated `plan.md`, `docs/api-contract.md`, and `AGENTS.md`; re-ran the idempotent seeder so the live banner config is refreshed.
+
+Final verification: backend SQLite suite 85 passed / 3 skipped / 651 assertions; PostgreSQL suite 88 passed / 666 assertions; Pint passed. Frontend typecheck, 41 tests across 16 files, oxlint, Prettier, and build all passed. Nothing was committed.
+
+## User
+
+> for adding product to the card, do not require sigining in for checkout, there must be sign in requirement only
+
+Made the cart public for guests and kept sign-in as a checkout/order requirement only. `CartIdentity` resolves either the authenticated user or an opaque `X-Cart-Token`; `CartService` creates, scopes, and prices guest carts on the server, and login/register merges those lines into the user cart before clearing the guest token. Cart routes no longer sit behind `auth:sanctum`, while checkout and orders still do. The SPA generates/persists `eneba_cart_token`, sends it on cart requests and auth payloads, opens `/cart` without a guard, and shows sign-in reminders only on checkout paths. Added backend coverage for guest add/view/remove, token issuance and isolation, merge on login/register, and checkout still requiring a token; added frontend coverage for guest adds, guest cart access, and the checkout guard. Updated `docs/api-contract.md`, `plan.md`, `README.md`, `frontend/README.md`, and `AGENTS.md`.
+
+Final verification: backend SQLite suite 89 passed / 3 skipped / 690 assertions; PostgreSQL suite 92 passed / 705 assertions; Pint passed. Frontend typecheck, 45 tests across 16 files, oxlint, Prettier, and build all passed. Nothing was committed.

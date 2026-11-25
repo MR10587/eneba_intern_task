@@ -8,9 +8,10 @@ use App\Services\CatalogService;
 /**
  * Resolves the `banner` homepage block.
  *
- * Invariant owned: a stale or inactive configured product must not break the
- * homepage. The copy still comes from the DB block config; only the product is
- * looked up, and it is always an active catalog summary.
+ * Invariant owned: a featured game must be purchasable. A stale, inactive, or
+ * sold-out configured product is replaced by the most popular available product;
+ * if none exists, the banner carries no product or CTA so the SPA hides it.
+ * Copy still comes from the DB block config.
  */
 class BannerBlockResolver implements HomeBlockResolver
 {
@@ -23,18 +24,15 @@ class BannerBlockResolver implements HomeBlockResolver
     public function resolve(array $config): array
     {
         $slug = $config['product_slug'] ?? null;
-
-        // WHY: no hardcoded fallback slug. If configuration is stale, the
-        // block degrades to "product": null instead of showing another game.
-        $product = is_string($slug) && $slug !== ''
-            ? $this->catalog->findActiveSummaryBySlug($slug)
-            : null;
+        $product = $this->catalog->findFeaturedProduct(is_string($slug) ? $slug : null);
 
         return [
             'headline' => $this->text($config, 'headline'),
             'subheadline' => $this->text($config, 'subheadline'),
-            'cta_label' => $this->text($config, 'cta_label'),
-            'cta_href' => $this->text($config, 'cta_href'),
+            'cta_label' => $product !== null ? $this->text($config, 'cta_label') : null,
+            // WHY: the CTA must follow the available product, not the stale
+            // configured slug, so a sold-out game is never recommended.
+            'cta_href' => $product !== null ? '/products/'.$product->slug : null,
             'product' => $product !== null ? (new ProductResource($product))->resolve() : null,
         ];
     }

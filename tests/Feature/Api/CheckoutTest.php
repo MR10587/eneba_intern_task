@@ -14,6 +14,7 @@ use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
 use Tests\TestCase;
 
 /**
@@ -308,7 +309,10 @@ class CheckoutTest extends TestCase
         OrderItem::create($attributes);
 
         try {
-            OrderItem::create($attributes);
+            // WHY: a nested transaction becomes a savepoint on PostgreSQL.
+            // Without it, the unique violation aborts the RefreshDatabase
+            // transaction and every later assertion fails with 25P02.
+            DB::transaction(fn () => OrderItem::create($attributes));
             $this->fail('A key must not be assignable to two order items.');
         } catch (QueryException) {
             $this->assertSame(1, OrderItem::query()->where('digital_key_id', $key->id)->count());

@@ -35,6 +35,7 @@ class ProductResource extends JsonResource
             'name' => $this->resource->name,
             'description' => $this->resource->description,
             'platform' => $this->resource->platform,
+            'category' => $this->resource->category,
             'genre' => $this->resource->genre,
             'release_date' => $releaseDate instanceof CarbonInterface
                 ? $releaseDate->toDateString()

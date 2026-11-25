@@ -9,9 +9,9 @@ Implemented:
 - `GET /products`
 - `GET /products/{slug}`
 - `GET /search`
-- `GET /cart` (token required)
-- `POST /cart/items` (token required)
-- `DELETE /cart/items/{offer}` (token required)
+- `GET /cart` (public; guest token issued when absent)
+- `POST /cart/items` (public; guest token issued when absent)
+- `DELETE /cart/items/{offer}` (public; guest token issued when absent)
 - `POST /checkout` (token required)
 - `GET /orders` (token required)
 - `GET /orders/{id}` (token required)
@@ -61,6 +61,7 @@ Only purchasable offers (active product, active offer, ≥1 available key) contr
 ```json
 {
   "data": {
+    "categories": ["Games", "Gift Cards", "Top-Ups", "Hardware", "Best Deals"],
     "platforms": ["Steam", "Epic Games", "Xbox", "PlayStation"],
     "regions": ["Europe", "Global", "US"],
     "price_range": { "min_cents": 499, "max_cents": 5999 },
@@ -75,6 +76,7 @@ Query parameters:
 
 | Param | Default | Rules |
 | --- | --- | --- |
+| `category` | null | One of the values from `/products/filters`; `Best Deals` is derived from backend price columns |
 | `platform` | null | Case-insensitive exact match |
 | `region` | null | Case-insensitive exact match on active offers |
 | `min_price` | null | Integer EUR cents, `>= 0` |
@@ -83,13 +85,14 @@ Query parameters:
 | `page` | `1` | `>= 1` |
 | `per_page` | `12` | `1–48` |
 
-Unknown parameters are ignored. All filters are ANDed.
+Unknown parameters are ignored; an unknown `category` is a validation error. All filters are ANDed and applied before pagination.
 
 Pricing rule: `min_price_cents` is the cheapest **active** offer that still has at least
-one `available` digital key. A product with no such offer remains visible with
-`min_price_cents: null`, `available: false`, and `available_offer_count: 0`; price filters
-never match it, and price sorts place it last. `relevance` aliases `popularity`
-here because there is no search term; real typo-tolerant ranking lives in `GET /search`.
+one `available` digital key. Products with no such offer are omitted from catalog
+and search grids, so every listed row has a price and can be purchased. They stay
+reachable through the product detail endpoint, where sold-out offers remain visible
+with `available: false`. `relevance` aliases `popularity` here because there is no
+search term; real typo-tolerant ranking lives in `GET /search`.
 
 ```json
 {
@@ -100,6 +103,7 @@ here because there is no search term; real typo-tolerant ranking lives in `GET /
       "name": "Minecraft",
       "description": "Build anything...",
       "platform": "Steam",
+      "category": "Games",
       "genre": "Sandbox",
       "release_date": "2011-11-18",
       "image_path": null,
@@ -118,7 +122,7 @@ here because there is no search term; real typo-tolerant ranking lives in `GET /
       "last_page": 3, "from": 1, "to": 12
     },
     "applied_filters": {
-      "platform": "Steam", "region": "Europe",
+      "category": "Games", "platform": "Steam", "region": "Europe",
       "min_price_cents": 0, "max_price_cents": 1000,
       "sort": "price_asc", "page": 1, "per_page": 12
     }
@@ -192,6 +196,11 @@ Query parameters:
 | Param | Default | Rules |
 | --- | --- | --- |
 | `q` | required | Trimmed text, 2–64 characters |
+| `category` | null | Same values/rules as `/products` |
+| `platform` | null | Same values/rules as `/products` |
+| `region` | null | Same values/rules as `/products` |
+| `min_price` | null | Integer EUR cents, `>= 0` |
+| `max_price` | null | Integer EUR cents, `>= min_price` |
 | `page` | `1` | `>= 1` |
 | `per_page` | `12` | `1–48` |
 
@@ -200,11 +209,17 @@ substring match, so partial names (`Minec`) and typos (`mincraft`) both find
 `Minecraft`. Results are ordered by relevance, then popularity, then slug.
 The SQLite test database has no trigram functions, so it uses a portable `LIKE`
 fallback: partial matches work, typo tolerance does not. This driver check keeps
-the test suite runnable without PostgreSQL-specific SQL errors.
+the test suite runnable without PostgreSQL-specific SQL errors. To verify the real
+trigram path, create an `eneba_store_test` database and run
+`php vendor/bin/phpunit -c phpunit.pgsql.xml`; the PostgreSQL-only tests then run
+instead of skipping.
 
 Search rows use the same `ProductResource` and pricing rule as `GET /products`:
-only active products are returned, and `min_price_cents` comes from the cheapest
-active offer with an available key. `offers` is not included in search results.
+only active, purchasable products are returned, and `min_price_cents` comes from
+the cheapest active offer with an available key. `offers` is not included in search
+results.
+Catalog filters are applied with the text match before pagination; `meta.applied_filters`
+echoes them in the same shape as `GET /products`.
 
 ```json
 {
@@ -213,6 +228,8 @@ active offer with an available key. `offers` is not included in search results.
       "id": 1,
       "slug": "minecraft",
       "name": "Minecraft",
+      "platform": "Steam",
+      "category": "Games",
       "min_price_cents": 1999,
       "currency": "EUR",
       "available": true,
@@ -222,6 +239,11 @@ active offer with an available key. `offers` is not included in search results.
   "meta": {
     "query": "mincraft",
     "result_count": 1,
+    "applied_filters": {
+      "category": null, "platform": null, "region": null,
+      "min_price_cents": null, "max_price_cents": null,
+      "sort": "popularity", "page": 1, "per_page": 12
+    },
     "pagination": {
       "current_page": 1, "per_page": 12, "total": 1,
       "last_page": 1, "from": 1, "to": 1
@@ -232,15 +254,16 @@ active offer with an available key. `offers` is not included in search results.
 
 `meta.result_count` is the total number of matches across all pages, not just
 the number of rows in `data`. Invalid parameters return the shared
-`422 VALIDATION_ERROR` envelope with `errors.q` and/or `errors.per_page`.
+`422 VALIDATION_ERROR` envelope with `errors.q`, `errors.category`, and/or
+`errors.per_page` as applicable.
 
 ## `GET /home`
 
 Public endpoint. Returns only enabled `homepage_blocks` rows, ordered by
 `position` then `id`. Each block's content is resolved server-side from its own
 `type` and `config`, so the SPA renders generically and hardcodes no products,
-headlines, or block data. Seed configuration arrives in Phase 4; until then
-temporary DB rows are used for manual checks.
+headlines, or block data. Enabled block configuration is provided by the
+deterministic `homepage_blocks` seeder; the SPA never supplies block content.
 
 ```json
 {
@@ -292,8 +315,8 @@ Block config keys:
 
 | Type | Config keys | Behavior |
 | --- | --- | --- |
-| `banner` | `product_slug`, `headline`, `subheadline`, `cta_label`, `cta_href` | Resolves an active product summary. Missing/inactive slug returns `"product": null`; the block still renders. No fallback slug exists in code. |
-| `best_sellers` | `limit` (optional) | Active products ordered by popularity then slug. Default 8, clamped to 1–12. |
+| `banner` | `product_slug`, `headline`, `subheadline`, `cta_label` | Resolves a purchasable product summary. If the configured slug is missing, inactive, or sold out, the most popular purchasable product is featured and `cta_href` points to it; with no purchasable products, `"product"` and `"cta_href"` are `null` and the SPA hides the banner. No fallback slug is hardcoded. |
+| `best_sellers` | `limit` (optional) | Purchasable active products ordered by popularity then slug. Default 8, clamped to 1–12. |
 | `deals` | `limit` (optional) | Active products with a purchasable price and `compare_at_price_cents > min_price_cents`. Default 8, clamped to 1–12. |
 
 Any other `type` returns `"data": []` without failing the request. Disabled
@@ -308,7 +331,7 @@ and there is no email verification or social login.
 
 ### `POST /auth/register`
 
-Body: `{ "name": "...", "email": "...", "password": "min 8 chars", "password_confirmation": "..." }`
+Body: `{ "name": "...", "email": "...", "password": "min 8 chars", "password_confirmation": "...", "cart_token": "<optional guest token>" }`
 
 201 response:
 
@@ -326,12 +349,15 @@ Body: `{ "name": "...", "email": "...", "password": "min 8 chars", "password_con
 ```
 
 Duplicate email or invalid fields → `422 VALIDATION_ERROR` with `errors.email` /
-`errors.password`. No token is issued on failure.
+`errors.password`. No token is issued on failure. A valid `cart_token` moves any
+guest cart lines into the new account before the token is returned.
 
 ### `POST /auth/login`
 
-Body: `{ "email": "...", "password": "..." }`. 200 response: identical `data` shape
-to registration. Wrong password **or** unknown email → `401 INVALID_CREDENTIALS`:
+Body: `{ "email": "...", "password": "...", "cart_token": "<optional guest token>" }`.
+200 response: identical `data` shape to registration. A valid `cart_token` moves
+any guest cart lines into the signed-in cart. Wrong password **or** unknown email
+→ `401 INVALID_CREDENTIALS`:
 
 ```json
 { "message": "The provided credentials are incorrect.", "code": "INVALID_CREDENTIALS" }
@@ -351,22 +377,29 @@ Returns the same `user` object shown above, directly under `data` (no token fiel
 
 ### Missing or invalid token
 
-Applies to `logout`, `me`, all cart endpoints, and all checkout/order endpoints:
+Applies to `logout`, `me`, `checkout`, and all order endpoints. Cart endpoints are
+public and do not return this error:
 
 ```json
 { "message": "Authentication is required.", "code": "UNAUTHENTICATED" }
 ```
 
-## Cart — token required
+## Cart — public
 
-There is exactly one cart per user. It is always derived from the authenticated
-user, so the client never sends a cart ID, user ID, price, or total. Quantity is
-always `1` per offer and there is intentionally **no** quantity-update endpoint.
+Guests may fill a cart before signing in. A signed-in request uses its user's
+cart; an anonymous request uses the opaque `X-Cart-Token` header. If that header
+is absent, the server issues a UUID and returns it as `meta.cart_token`, which
+the SPA persists and sends on later cart requests. Sign-in passes the same token
+as `cart_token` in the login/register body, merging the guest cart into the
+user's cart and deleting the guest row. A guest token cannot read another
+shopper's cart; it only moves its own lines into the signed-in cart, and no
+client-supplied cart ID, user ID, price, or total is trusted.
 
-Only an **active product**, an **active offer**, and at least one **available
-digital key** can be added. If an item becomes stale after it was added (key sold
-or offer deactivated), it remains visible with `"available": false`; its price is
-never silently changed. Checkout performs the authoritative recheck later.
+Quantity is always `1` per offer and there is intentionally **no** quantity-update
+endpoint. Only an **active product**, an **active offer**, and at least one
+**available digital key** can be added. If an item becomes stale after it was
+added (key sold or offer deactivated), it remains visible with `"available": false`;
+its price is never silently changed. Checkout performs the authoritative recheck later.
 
 ### `GET /cart`
 
@@ -389,12 +422,13 @@ never silently changed. Checkout performs the authoritative recheck later.
     "total_cents": 1999,
     "currency": "EUR"
   },
-  "meta": { "item_count": 1, "available_item_count": 1 }
+  "meta": { "item_count": 1, "available_item_count": 1, "cart_token": "<guest only>" }
 }
 ```
 
-`total_cents` is the sum of all line totals (including stale items).
-`available_item_count` lets the SPA warn about stale items without rechecking stock.
+`cart_token` is present only for anonymous requests. `total_cents` is the sum of
+all line totals (including stale items). `available_item_count` lets the SPA warn
+about stale items without rechecking stock.
 
 ### `POST /cart/items`
 
@@ -411,9 +445,9 @@ Validation of the two IDs uses the shared `422 VALIDATION_ERROR` envelope.
 
 ### `DELETE /cart/items/{offer}`
 
-Deletes that offer from the current user's cart only and returns `200` with the
-updated cart. An offer that is not in this user's cart returns
-`404 NOT_FOUND`; another user's item is indistinguishable from a missing one.
+Deletes that offer from the current user's or guest's cart only and returns `200`
+with the updated cart. An offer that is not in this cart returns
+`404 NOT_FOUND`; another shopper's item is indistinguishable from a missing one.
 
 ## Checkout — token required
 

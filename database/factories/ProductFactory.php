@@ -25,6 +25,7 @@ class ProductFactory extends Factory
             'name' => ucfirst($name),
             'description' => fake()->sentence(),
             'platform' => fake()->randomElement(['Steam', 'Epic Games', 'Xbox', 'PlayStation']),
+            'category' => 'Games',
             'genre' => fake()->randomElement(['Action', 'Sandbox', 'RPG', 'Strategy']),
             'release_date' => fake()->date(),
             'image_path' => null,

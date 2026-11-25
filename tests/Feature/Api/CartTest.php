@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\Api;
 
+use App\Models\Cart;
 use App\Models\CartItem;
 use App\Models\DigitalKey;
 use App\Models\Offer;
@@ -9,14 +10,17 @@ use App\Models\Product;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Str;
 use Tests\TestCase;
 
 /**
  * Feature tests for /api/cart/*.
  *
- * WHY: these pin the three security/business invariants that matter most —
- * only the authenticated user's cart is reachable, all money comes from the
- * persisted offer, and stale items are reported instead of silently changed.
+ * WHY: these pin the security/business invariants that matter most — guests
+ * can shop without an account, signed-in users reach only their own cart, all
+ * money comes from the persisted offer, and stale items are reported instead
+ * of silently changed.
  */
 class CartTest extends TestCase
 {
@@ -47,19 +51,171 @@ class CartTest extends TestCase
         return $user->createToken('api')->plainTextToken;
     }
 
-    public function test_all_cart_endpoints_require_authentication(): void
+    private function guestToken(): string
     {
-        $this->getJson('/api/cart')
-            ->assertUnauthorized()
-            ->assertJsonPath('code', 'UNAUTHENTICATED');
+        return Str::uuid()->toString();
+    }
 
-        $this->postJson('/api/cart/items', ['product_id' => 1, 'offer_id' => 1])
-            ->assertUnauthorized()
-            ->assertJsonPath('code', 'UNAUTHENTICATED');
+    public function test_guest_can_add_read_and_remove_cart_items_without_signing_in(): void
+    {
+        $fixture = $this->purchasableProduct(['name' => 'Guest Game'], 1999);
+        $token = $this->guestToken();
 
-        $this->deleteJson('/api/cart/items/1')
+        $this->withHeader('X-Cart-Token', $token)
+            ->postJson('/api/cart/items', [
+                'product_id' => $fixture['product']->id,
+                'offer_id' => $fixture['offer']->id,
+            ])
+            ->assertCreated()
+            ->assertJsonPath('meta.cart_token', $token)
+            ->assertJsonPath('data.items.0.line_total_cents', 1999)
+            ->assertJsonPath('data.total_cents', 1999)
+            ->assertJsonPath('meta.item_count', 1);
+
+        $this->withHeader('X-Cart-Token', $token)
+            ->getJson('/api/cart')
+            ->assertOk()
+            ->assertJsonPath('meta.cart_token', $token)
+            ->assertJsonCount(1, 'data.items')
+            ->assertJsonPath('data.total_cents', 1999);
+
+        $this->withHeader('X-Cart-Token', $token)
+            ->deleteJson('/api/cart/items/'.$fixture['offer']->id)
+            ->assertOk()
+            ->assertJsonPath('meta.cart_token', $token)
+            ->assertJsonCount(0, 'data.items')
+            ->assertJsonPath('data.total_cents', 0);
+    }
+
+    public function test_guest_without_a_token_receives_one_it_can_reuse(): void
+    {
+        $token = $this->getJson('/api/cart')
+            ->assertOk()
+            ->assertJsonCount(0, 'data.items')
+            ->json('meta.cart_token');
+
+        $this->assertIsString($token);
+        $token = (string) $token;
+
+        $fixture = $this->purchasableProduct([], 1200);
+
+        $this->withHeader('X-Cart-Token', $token)
+            ->postJson('/api/cart/items', [
+                'product_id' => $fixture['product']->id,
+                'offer_id' => $fixture['offer']->id,
+            ])
+            ->assertCreated()
+            ->assertJsonPath('meta.cart_token', $token);
+
+        $this->assertDatabaseHas('carts', ['guest_token' => $token]);
+    }
+
+    public function test_guest_cart_tokens_are_isolated(): void
+    {
+        $fixture = $this->purchasableProduct([], 4200);
+        $ownerToken = $this->guestToken();
+        $otherToken = $this->guestToken();
+
+        $this->withHeader('X-Cart-Token', $ownerToken)
+            ->postJson('/api/cart/items', [
+                'product_id' => $fixture['product']->id,
+                'offer_id' => $fixture['offer']->id,
+            ])
+            ->assertCreated();
+
+        $this->withHeader('X-Cart-Token', $otherToken)
+            ->getJson('/api/cart')
+            ->assertOk()
+            ->assertJsonCount(0, 'data.items')
+            ->assertJsonPath('data.total_cents', 0);
+
+        $this->withHeader('X-Cart-Token', $otherToken)
+            ->deleteJson('/api/cart/items/'.$fixture['offer']->id)
+            ->assertNotFound()
+            ->assertJsonPath('code', 'NOT_FOUND');
+
+        $this->withHeader('X-Cart-Token', $ownerToken)
+            ->getJson('/api/cart')
+            ->assertOk()
+            ->assertJsonCount(1, 'data.items')
+            ->assertJsonPath('data.total_cents', 4200);
+    }
+
+    public function test_guest_cart_merges_on_login_and_checkout_still_requires_a_token(): void
+    {
+        $first = $this->purchasableProduct(['name' => 'Guest First'], 1000);
+        $second = $this->purchasableProduct(['name' => 'Guest Second'], 2000);
+        $user = User::factory()->create([
+            'email' => 'buyer@example.com',
+            'password' => Hash::make('password'),
+        ]);
+        $guestToken = $this->guestToken();
+
+        foreach ([$first, $second] as $fixture) {
+            $this->withHeader('X-Cart-Token', $guestToken)
+                ->postJson('/api/cart/items', [
+                    'product_id' => $fixture['product']->id,
+                    'offer_id' => $fixture['offer']->id,
+                ])
+                ->assertCreated();
+        }
+
+        $this->postJson('/api/auth/login', [
+            'email' => 'buyer@example.com',
+            'password' => 'password',
+            'cart_token' => $guestToken,
+        ])->assertOk();
+
+        $this->assertDatabaseMissing('carts', ['guest_token' => $guestToken]);
+
+        Auth::forgetGuards();
+
+        $this->withToken($this->tokenFor($user))
+            ->getJson('/api/cart')
+            ->assertOk()
+            ->assertJsonCount(2, 'data.items')
+            ->assertJsonPath('data.total_cents', 3000)
+            ->assertJsonMissingPath('meta.cart_token');
+
+        Auth::forgetGuards();
+        $this->flushHeaders();
+
+        $this->withHeader('X-Cart-Token', $guestToken)
+            ->postJson('/api/checkout', ['card_number' => '4242424242424242'])
             ->assertUnauthorized()
             ->assertJsonPath('code', 'UNAUTHENTICATED');
+    }
+
+    public function test_guest_cart_merges_on_registration(): void
+    {
+        $fixture = $this->purchasableProduct([], 1500);
+        $guestToken = $this->guestToken();
+
+        $this->withHeader('X-Cart-Token', $guestToken)
+            ->postJson('/api/cart/items', [
+                'product_id' => $fixture['product']->id,
+                'offer_id' => $fixture['offer']->id,
+            ])
+            ->assertCreated();
+
+        $response = $this->postJson('/api/auth/register', [
+            'name' => 'New Buyer',
+            'email' => 'new-buyer@example.com',
+            'password' => 'password123',
+            'password_confirmation' => 'password123',
+            'cart_token' => $guestToken,
+        ])->assertCreated();
+
+        Auth::forgetGuards();
+
+        $this->withToken($response->json('data.token'))
+            ->getJson('/api/cart')
+            ->assertOk()
+            ->assertJsonCount(1, 'data.items')
+            ->assertJsonPath('data.total_cents', 1500);
+
+        $this->assertDatabaseCount('cart_items', 1);
+        $this->assertDatabaseMissing('carts', ['guest_token' => $guestToken]);
     }
 
     public function test_empty_cart_returns_zero_totals(): void

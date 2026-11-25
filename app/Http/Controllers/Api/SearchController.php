@@ -31,6 +31,7 @@ class SearchController extends Controller
                 // WHY: the SPA needs the full match count, not just the number
                 // of rows on the current page.
                 'result_count' => $paginator->total(),
+                'applied_filters' => $result['applied_filters'],
                 'pagination' => [
                     'current_page' => $paginator->currentPage(),
                     'per_page' => $paginator->perPage(),

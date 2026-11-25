@@ -1,58 +1,151 @@
-<p align="center"><a href="https://laravel.com" target="_blank"><img src="https://raw.githubusercontent.com/laravel/art/master/logo-lockup/5%20SVG/2%20CMYK/1%20Full%20Color/laravel-logolockup-cmyk-red.svg" width="400" alt="Laravel Logo"></a></p>
+# Eneba — digital game key marketplace demo
 
-<p align="center">
-<a href="https://github.com/laravel/framework/actions"><img src="https://github.com/laravel/framework/workflows/tests/badge.svg" alt="Build Status"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/dt/laravel/framework" alt="Total Downloads"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/v/laravel/framework" alt="Latest Stable Version"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/l/laravel/framework" alt="License"></a>
-</p>
+A full-stack demo storefront built with a Laravel 13 API and a separate React 19 + TypeScript SPA. The API owns all catalog, pricing, cart, checkout, order, and digital-key logic; the frontend renders that data and never computes prices.
 
-## About Laravel
+Payments are simulated only. Cards ending in `0002` fail intentionally; no real payment provider is used.
 
-Laravel is a web application framework with expressive, elegant syntax. We believe development must be an enjoyable and creative experience to be truly fulfilling. Laravel takes the pain out of development by easing common tasks used in many web projects, such as:
+## Layout
 
-- [Simple, fast routing engine](https://laravel.com/docs/routing).
-- [Powerful dependency injection container](https://laravel.com/docs/container).
-- Multiple back-ends for [session](https://laravel.com/docs/session) and [cache](https://laravel.com/docs/cache) storage.
-- Expressive, intuitive [database ORM](https://laravel.com/docs/eloquent).
-- Database agnostic [schema migrations](https://laravel.com/docs/migrations).
-- [Robust background job processing](https://laravel.com/docs/queues).
-- [Real-time event broadcasting](https://laravel.com/docs/broadcasting).
+| Path                                                 | Purpose                                                              |
+| ---------------------------------------------------- | -------------------------------------------------------------------- |
+| `app/`, `routes/api.php`, `database/`, `tests/`      | Laravel API, migrations, deterministic seeders, feature tests        |
+| `frontend/`                                          | Vite + React SPA on port `5173`, proxying `/api` to `127.0.0.1:8000` |
+| `docs/api-contract.md`                               | Authoritative request/response shapes and error codes                |
+| `SPEC.md`, `plan.md`, `AGENTS.md`, `CHAT_HISTORY.md` | Product spec, implementation record, agent notes, decisions          |
 
-Laravel is accessible, powerful, and provides tools required for large, robust applications.
+The root `/` route is the live purple storefront: it reads homepage blocks, products, filters, and search results from the API. Guests can add offers to a server-side cart; signing in is required only at checkout and order history. Purchase pages remain available at `/browse`, `/products`, `/search`, `/cart`, `/checkout`, and `/orders`.
 
-## Learning Laravel
+## Requirements
 
-Laravel has the most extensive and thorough [documentation](https://laravel.com/docs) and video tutorial library of all modern web application frameworks, making it a breeze to get started with the framework.
+- PHP 8.5+ with `fileinfo`, `intl`, `pdo_pgsql`, `pdo_sqlite`, and `zip`
+- Composer 2+
+- PostgreSQL 18 (local `.env` uses `eneba_store` on `127.0.0.1:5432`)
+- Node 24+ and npm 11+
 
-In addition, [Laracasts](https://laracasts.com) contains thousands of video tutorials on a range of topics including Laravel, modern PHP, unit testing, and JavaScript. Boost your skills by digging into our comprehensive video library.
+Docker/Sail is not required. On the verified Windows machine, PHP and Composer are not on `PATH`; use the explicit paths below.
 
-You can also watch bite-sized lessons with real-world projects on [Laravel Learn](https://laravel.com/learn), where you will be guided through building a Laravel application from scratch while learning PHP fundamentals.
+## Setup
 
-## Agentic Development
-
-Laravel's predictable structure and conventions make it ideal for AI coding agents like Claude Code, Cursor, and GitHub Copilot. Install [Laravel Boost](https://laravel.com/docs/ai) to supercharge your AI workflow:
-
-```bash
-composer require laravel/boost --dev
-
-php artisan boost:install
+```powershell
+Copy-Item .env.example .env
+& 'C:\php\php.exe' artisan key:generate
+& 'C:\php\php.exe' artisan migrate:fresh --seed --force
 ```
 
-Boost provides your agent 15+ tools and skills that help agents build Laravel applications while following best practices.
+Configure `.env` for PostgreSQL:
 
-## Contributing
+```dotenv
+APP_NAME=Eneba
+DB_CONNECTION=pgsql
+DB_HOST=127.0.0.1
+DB_PORT=5432
+DB_DATABASE=eneba_store
+DB_USERNAME=postgres
+DB_PASSWORD=<your local password>
+```
 
-Thank you for considering contributing to the Laravel framework! The contribution guide can be found in the [Laravel documentation](https://laravel.com/docs/contributions).
+Install frontend dependencies:
 
-## Code of Conduct
+```powershell
+cd frontend
+npm install
+```
 
-In order to ensure that the Laravel community is welcoming to all, please review and abide by the [Code of Conduct](https://laravel.com/docs/contributions#code-of-conduct).
+`migrate:fresh --seed` is idempotent by natural keys and creates 39 products, 3 sellers, 98 offers, 401 digital keys, 4 homepage blocks, and the demo user. The catalog covers games, gift cards, top-ups, and hardware; the storefront's category filters are sent to the API and applied before pagination.
 
-## Security Vulnerabilities
+## Run locally
 
-If you discover a security vulnerability within Laravel, please send an e-mail to Taylor Otwell via [taylor@laravel.com](mailto:taylor@laravel.com). All security vulnerabilities will be promptly addressed.
+Terminal 1 — API:
 
-## License
+```powershell
+& 'C:\php\php.exe' artisan serve
+```
 
-The Laravel framework is open-sourced software licensed under the [MIT license](https://opensource.org/licenses/MIT).
+Terminal 2 — SPA:
+
+```powershell
+cd frontend
+npm run dev
+```
+
+Open `http://localhost:5173`. The Vite proxy forwards `/api/*` to `http://127.0.0.1:8000`.
+
+## Demo credentials and test card
+
+- Email: `test@example.com`
+- Password: `password`
+- Successful payment: any 13–19 digit card number, e.g. `4242 4242 4242 4242`
+- Failed payment: any card ending in `0002`, e.g. `4242 4242 4242 0002`
+
+Only the masked last four digits are stored in `payment_reference`. A failed payment creates no order and delivers no key.
+
+## Full-flow checklist
+
+1. Open the live storefront at `/`, browse `/browse`, or search `mincraft` at `/search?q=mincraft`.
+2. Open a product, review seller offers, and add an available offer as a guest.
+3. Review `/cart`; totals come from the API. An unavailable line is named and disables checkout until removed.
+4. Select checkout; sign in or register there. Any guest cart lines follow you into your account.
+5. At `/checkout`, first try a card ending in `0002` and confirm the failure message.
+6. Retry with a success card; the order detail page shows the delivered key.
+7. Open `/orders` and confirm the purchase and date.
+
+## Verification
+
+Backend:
+
+```powershell
+& 'C:\php\php.exe' artisan test
+& 'C:\php\php.exe' vendor/bin/pint --test
+& 'C:\php\php.exe' artisan route:list --path=api
+```
+
+To run the PostgreSQL-only typo tests, create an `eneba_store_test` database and run:
+
+```powershell
+& 'C:\php\php.exe' vendor/bin/phpunit -c phpunit.pgsql.xml
+```
+
+Frontend:
+
+```powershell
+cd frontend
+npm run typecheck
+npm test
+npm run lint
+npm run format:check
+npm run build
+```
+
+Current verified results: **77 backend tests / 582 assertions**, Pint passed, **15 API routes**, and **33 frontend tests across 15 files** with typecheck, lint, format, and build all passing.
+
+## Key API endpoints
+
+| Method   | Endpoint                  | Auth |
+| -------- | ------------------------- | ---- |
+| `GET`    | `/api/home`               | No   |
+| `GET`    | `/api/products/filters`   | No   |
+| `GET`    | `/api/products`           | No   |
+| `GET`    | `/api/products/{slug}`    | No   |
+| `GET`    | `/api/search`             | No   |
+| `POST`   | `/api/auth/register`      | No   |
+| `POST`   | `/api/auth/login`         | No   |
+| `POST`   | `/api/auth/logout`        | Yes  |
+| `GET`    | `/api/auth/me`            | Yes  |
+| `GET`    | `/api/cart`               | No   |
+| `POST`   | `/api/cart/items`         | No   |
+| `DELETE` | `/api/cart/items/{offer}` | No   |
+| `POST`   | `/api/checkout`           | Yes  |
+| `GET`    | `/api/orders`             | Yes  |
+| `GET`    | `/api/orders/{id}`        | Yes  |
+
+All money values are integer cents in EUR. See `docs/api-contract.md` for full shapes and coded errors.
+
+## Implementation notes
+
+- Sanctum personal access tokens are stored in the browser under `eneba_token`.
+- Guest carts are keyed by an opaque token stored under `eneba_cart_token` and merged into the user cart at sign-in.
+- Cart quantity is always one per offer; there is no quantity-update endpoint.
+- Checkout rechecks live product, offer, and key state inside a transaction.
+- A digital key is assigned to at most one order.
+- No page hardcodes product data; `/` and the other storefront routes all read live API data.
+- No Eneba logo, artwork, or other proprietary asset files are bundled; the name is used as a text wordmark only.

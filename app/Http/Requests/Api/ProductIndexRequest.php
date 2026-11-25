@@ -3,6 +3,7 @@
 namespace App\Http\Requests\Api;
 
 use Illuminate\Contracts\Validation\Validator;
+use Illuminate\Validation\Rule;
 
 /**
  * Validates GET /api/products query parameters only.
@@ -20,6 +21,7 @@ class ProductIndexRequest extends ApiFormRequest
         $maxPerPage = (int) config('catalog.max_per_page');
 
         return [
+            'category' => ['sometimes', Rule::in(config('catalog.categories'))],
             'platform' => ['sometimes', 'string', 'max:100'],
             'region' => ['sometimes', 'string', 'max:100'],
 

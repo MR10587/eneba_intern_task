@@ -57,13 +57,14 @@ Route::prefix('products')->group(function (): void {
 Route::get('search', SearchController::class);
 
 /**
- * Cart endpoints — signed-in only.
+ * Cart endpoints — public for guests, authenticated for returning users.
  *
- * WHY: the whole group sits behind auth:sanctum. The service derives the cart
- * from the authenticated user, so no cart or user ID is accepted from the
- * client and one user can never reach another user's cart.
+ * WHY: shoppers may add offers before signing in. CartService derives the cart
+ * either from the authenticated user or from a server-issued guest token; a
+ * signed-in user never sees a guest cart and a guest token never reaches a
+ * user cart. Sign-in merges the guest cart into the user's cart.
  */
-Route::middleware('auth:sanctum')->prefix('cart')->group(function (): void {
+Route::prefix('cart')->group(function (): void {
     Route::get('/', [CartController::class, 'index']);
     Route::post('items', [CartController::class, 'store']);
     Route::delete('items/{offer}', [CartController::class, 'destroy'])->whereNumber('offer');

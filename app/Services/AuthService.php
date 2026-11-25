@@ -18,7 +18,7 @@ class AuthService
     /**
      * Create an account and issue its first API token.
      *
-     * @param  array{name: string, email: string, password: string}  $data
+     * @param  array{name: string, email: string, password: string, cart_token?: string|null}  $data
      * @return array{user: User, token: string}
      */
     public function register(array $data): array
@@ -38,7 +38,7 @@ class AuthService
     /**
      * Verify credentials and issue a fresh token.
      *
-     * @param  array{email: string, password: string}  $data
+     * @param  array{email: string, password: string, cart_token?: string|null}  $data
      * @return array{user: User, token: string}
      *
      * @throws ApiException when the email or password is wrong

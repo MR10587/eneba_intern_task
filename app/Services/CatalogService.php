@@ -13,7 +13,7 @@ use Illuminate\Support\Facades\DB;
  * All catalog read logic lives here.
  *
  * Invariants owned by this class:
- *  1. Only active products are visible.
+ *  1. Only active, purchasable products are visible in browsing endpoints.
  *  2. A "purchasable" offer is active AND has at least one available key.
  *  3. Prices are always read from persisted offers, never from request input.
  */
@@ -51,6 +51,9 @@ class CatalogService
             ->first();
 
         return [
+            // Categories are configured server-side; "Best Deals" is a
+            // derived view over discount_percent, not a stored product value.
+            'categories' => config('catalog.categories'),
             'platforms' => $platforms,
             'regions' => $regions,
             'price_range' => [
@@ -77,14 +80,58 @@ class CatalogService
         $base->where('products.is_active', true);
         $this->addComputedPriceColumns($base);
 
+        // Wrap the Eloquent query so computed columns become ordinary columns.
+        $query = DB::query()->fromSub($base, 'products');
+        $this->applyFilters($query, $filters);
+
+        $sort = $filters['sort'] ?? 'popularity';
+        $this->applySort($query, $sort);
+
+        $perPage = (int) ($filters['per_page'] ?? config('catalog.per_page'));
+        $page = (int) ($filters['page'] ?? 1);
+
+        // paginate() validates nothing destructive; it only reads rows.
+        $paginator = $query->paginate($perPage, ['*'], 'page', $page);
+
+        return [
+            'paginator' => $paginator,
+            'applied_filters' => $this->appliedFilters($filters),
+        ];
+    }
+
+    /**
+     * Apply the shared catalog filters to a query whose table alias is
+     * `products`. Search reuses this so filters and pagination stay in sync.
+     *
+     * @param  array<string, mixed>  $filters
+     */
+    public function applyFilters(Builder $query, array $filters): void
+    {
+        // Buyers browse only products that can actually be purchased. Sold-out
+        // products stay visible on their detail page, but never fill a grid.
+        $query->whereNotNull('products.min_price_cents');
+
+        if (! empty($filters['category'])) {
+            $category = (string) $filters['category'];
+
+            if ($category === 'Best Deals') {
+                // Deals are derived from the backend's own price columns,
+                // never from a client-computed discount.
+                $query->whereNotNull('products.min_price_cents')
+                    ->whereColumn('products.compare_at_price_cents', '>', 'products.min_price_cents');
+            } else {
+                $query->whereRaw('LOWER(products.category) = LOWER(?)', [$category]);
+            }
+        }
+
         if (! empty($filters['platform'])) {
             // Case-insensitive exact match against an API-supplied option.
-            $base->whereRaw('LOWER(products.platform) = LOWER(?)', [$filters['platform']]);
+            $query->whereRaw('LOWER(products.platform) = LOWER(?)', [$filters['platform']]);
         }
 
         if (! empty($filters['region'])) {
-            $base->whereExists(function (Builder $query) use ($filters): void {
-                $query->select(DB::raw(1))
+            $query->whereExists(function (Builder $regions) use ($filters): void {
+                $regions->select(DB::raw(1))
                     ->from('offers')
                     ->whereColumn('offers.product_id', 'products.id')
                     ->where('offers.is_active', true)
@@ -98,37 +145,33 @@ class CatalogService
             });
         }
 
-        // Wrap the Eloquent query so computed columns become ordinary columns.
-        $query = DB::query()->fromSub($base, 'products');
-
         if (array_key_exists('min_price', $filters) && $filters['min_price'] !== null) {
-            $query->where('min_price_cents', '>=', (int) $filters['min_price']);
+            $query->where('products.min_price_cents', '>=', (int) $filters['min_price']);
         }
 
         if (array_key_exists('max_price', $filters) && $filters['max_price'] !== null) {
-            $query->where('min_price_cents', '<=', (int) $filters['max_price']);
+            $query->where('products.min_price_cents', '<=', (int) $filters['max_price']);
         }
+    }
 
+    /**
+     * @param  array<string, mixed>  $filters
+     * @return array<string, mixed>
+     */
+    public function appliedFilters(array $filters): array
+    {
         $sort = $filters['sort'] ?? 'popularity';
-        $this->applySort($query, $sort);
 
-        $perPage = (int) ($filters['per_page'] ?? config('catalog.per_page'));
-        $page = (int) ($filters['page'] ?? 1);
-
-        // paginate() validates nothing destructive; it only reads rows.
-        $paginator = $query->paginate($perPage, ['*'], 'page', $page);
-
-        $appliedFilters = [
+        return [
+            'category' => $filters['category'] ?? null,
             'platform' => $filters['platform'] ?? null,
             'region' => $filters['region'] ?? null,
             'min_price_cents' => isset($filters['min_price']) ? (int) $filters['min_price'] : null,
             'max_price_cents' => isset($filters['max_price']) ? (int) $filters['max_price'] : null,
             'sort' => $sort,
-            'page' => $page,
-            'per_page' => $perPage,
+            'page' => (int) ($filters['page'] ?? 1),
+            'per_page' => (int) ($filters['per_page'] ?? config('catalog.per_page')),
         ];
-
-        return ['paginator' => $paginator, 'applied_filters' => $appliedFilters];
     }
 
     /**
@@ -142,7 +185,8 @@ class CatalogService
             ->where('products.slug', $slug)
             ->where('products.is_active', true)
             ->with(['offers' => function ($query): void {
-                // Inactive offers stay visible with available: false.
+                // Only active offers are exposed; sold-out ones remain visible
+                // with available: false so the buyer can see the price.
                 $query->where('offers.is_active', true)
                     ->with('seller')
                     ->withCount(['digitalKeys as available_key_count' => function ($keys): void {
@@ -178,13 +222,12 @@ class CatalogService
     }
 
     /**
-     * Active product summary for homepage blocks.
+     * Purchasable product for a configured homepage slug.
      *
-     * WHY: banner configuration can point at a missing or inactive slug.
-     * Returning null lets the caller degrade gracefully instead of throwing
-     * PRODUCT_NOT_FOUND and breaking the whole homepage. Offers are
-     * intentionally not loaded, so ProductResource returns a catalog summary
-     * rather than the product detail payload.
+     * WHY: a banner must never recommend a sold-out product. Returning null
+     * lets the caller degrade gracefully instead of throwing PRODUCT_NOT_FOUND
+     * and breaking the whole homepage. Offers are intentionally not loaded, so
+     * ProductResource returns a catalog summary rather than product detail.
      */
     public function findActiveSummaryBySlug(string $slug): ?Product
     {
@@ -192,9 +235,51 @@ class CatalogService
             ->where('products.slug', $slug)
             ->where('products.is_active', true);
 
+        $this->scopePurchasable($query);
         $this->addComputedPriceColumns($query);
 
         return $query->first();
+    }
+
+    /**
+     * Pick the product to feature in a banner.
+     *
+     * The configured slug wins while it remains purchasable. If it sells out,
+     * the most popular purchasable product is used instead; there is no
+     * hardcoded fallback slug and an empty catalog yields null.
+     */
+    public function findFeaturedProduct(?string $slug): ?Product
+    {
+        if (is_string($slug) && $slug !== '') {
+            $configured = $this->findActiveSummaryBySlug($slug);
+
+            if ($configured !== null) {
+                return $configured;
+            }
+        }
+
+        $query = Product::query()->where('products.is_active', true);
+
+        $this->scopePurchasable($query);
+        $this->addComputedPriceColumns($query);
+
+        return $query->orderByDesc('products.popularity')
+            ->orderBy('products.slug')
+            ->first();
+    }
+
+    /**
+     * Restrict an Eloquent product query to products with an active offer and
+     * at least one unassigned key.
+     */
+    private function scopePurchasable(EloquentBuilder $query): void
+    {
+        $query->whereHas('offers', function ($offers): void {
+            $offers->where('offers.is_active', true)
+                ->whereHas('digitalKeys', function ($keys): void {
+                    $keys->where('digital_keys.status', 'available');
+                });
+        });
     }
 
     /**

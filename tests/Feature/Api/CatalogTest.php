@@ -59,12 +59,73 @@ class CatalogTest extends TestCase
         $response = $this->getJson('/api/products/filters');
 
         $response->assertOk()->assertJsonPath('data.currency', 'EUR');
+        $this->assertEqualsCanonicalizing(
+            config('catalog.categories'),
+            $response->json('data.categories'),
+        );
         $this->assertContains('Steam', $response->json('data.platforms'));
         $this->assertContains('Epic Games', $response->json('data.platforms'));
         $this->assertNotContains('Xbox', $response->json('data.platforms'));
         $this->assertEqualsCanonicalizing(['Europe', 'Global'], $response->json('data.regions'));
         $this->assertSame(1000, $response->json('data.price_range.min_cents'));
         $this->assertSame(2500, $response->json('data.price_range.max_cents'));
+    }
+
+    public function test_stored_category_filters_use_backend_pagination_and_metadata(): void
+    {
+        $giftCard = $this->purchasableProduct(
+            ['name' => 'Steam Gift Card', 'category' => 'Gift Cards', 'platform' => 'Steam'],
+            2000,
+            ['region' => 'Europe'],
+        );
+        $this->purchasableProduct(
+            ['name' => 'Another Game', 'category' => 'Games', 'platform' => 'Steam'],
+            2500,
+            ['region' => 'Europe'],
+        );
+
+        $response = $this->getJson('/api/products?category=Gift%20Cards&platform=Steam&region=Europe&max_price=2000');
+
+        $response->assertOk()
+            ->assertJsonCount(1, 'data')
+            ->assertJsonPath('data.0.slug', $giftCard->slug)
+            ->assertJsonPath('meta.pagination.total', 1)
+            ->assertJsonPath('meta.applied_filters.category', 'Gift Cards')
+            ->assertJsonPath('meta.applied_filters.max_price_cents', 2000);
+    }
+
+    public function test_best_deals_is_a_backend_derived_filter(): void
+    {
+        $deal = $this->purchasableProduct(
+            [
+                'name' => 'Discounted Game',
+                'category' => 'Games',
+                'platform' => 'Steam',
+                'compare_at_price_cents' => 5000,
+            ],
+            3000,
+            ['region' => 'Europe'],
+        );
+        $this->purchasableProduct(
+            ['name' => 'Full Price Game', 'category' => 'Games', 'platform' => 'Xbox'],
+            3000,
+            ['region' => 'US'],
+        );
+
+        $this->getJson('/api/products?category=Best%20Deals&platform=Steam&region=Europe&max_price=3000')
+            ->assertOk()
+            ->assertJsonCount(1, 'data')
+            ->assertJsonPath('data.0.slug', $deal->slug)
+            ->assertJsonPath('meta.pagination.total', 1)
+            ->assertJsonPath('meta.applied_filters.category', 'Best Deals');
+    }
+
+    public function test_unknown_category_uses_validation_error_envelope(): void
+    {
+        $this->getJson('/api/products?category=Consoles')
+            ->assertUnprocessable()
+            ->assertJsonPath('code', 'VALIDATION_ERROR')
+            ->assertJsonStructure(['errors' => ['category']]);
     }
 
     public function test_only_active_products_are_listed(): void
@@ -99,7 +160,7 @@ class CatalogTest extends TestCase
         $this->assertSame('EUR', $response->json('data.0.currency'));
     }
 
-    public function test_unavailable_product_is_listed_with_null_price(): void
+    public function test_unavailable_products_are_hidden_from_the_catalog(): void
     {
         $product = Product::factory()->create(['is_active' => true]);
         $offer = Offer::factory()->for($product)->create(['price_cents' => 1200]);
@@ -108,10 +169,13 @@ class CatalogTest extends TestCase
         $response = $this->getJson('/api/products');
 
         $response->assertOk()
-            ->assertJsonPath('data.0.slug', $product->slug)
-            ->assertJsonPath('data.0.min_price_cents', null)
-            ->assertJsonPath('data.0.available', false)
-            ->assertJsonPath('data.0.available_offer_count', 0);
+            ->assertJsonCount(0, 'data')
+            ->assertJsonPath('meta.pagination.total', 0);
+
+        // The product itself remains reachable by its detail URL.
+        $this->getJson('/api/products/'.$product->slug)
+            ->assertOk()
+            ->assertJsonPath('data.available', false);
     }
 
     public function test_price_filters_compare_against_computed_min_price(): void
@@ -152,7 +216,7 @@ class CatalogTest extends TestCase
         $this->assertFalse($slugs->contains($other->slug));
     }
 
-    public function test_price_sorting_puts_unavailable_products_last(): void
+    public function test_price_sorting_ignores_unavailable_products(): void
     {
         $unavailable = Product::factory()->create(['name' => 'No Keys']);
         $offer = Offer::factory()->for($unavailable)->create(['price_cents' => 100]);
@@ -165,14 +229,14 @@ class CatalogTest extends TestCase
         $descending = $this->getJson('/api/products?sort=price_desc');
 
         $ascending->assertOk()
+            ->assertJsonCount(2, 'data')
             ->assertJsonPath('data.0.slug', $cheap->slug)
-            ->assertJsonPath('data.1.slug', $expensive->slug)
-            ->assertJsonPath('data.2.slug', $unavailable->slug);
+            ->assertJsonPath('data.1.slug', $expensive->slug);
 
         $descending->assertOk()
+            ->assertJsonCount(2, 'data')
             ->assertJsonPath('data.0.slug', $expensive->slug)
-            ->assertJsonPath('data.1.slug', $cheap->slug)
-            ->assertJsonPath('data.2.slug', $unavailable->slug);
+            ->assertJsonPath('data.1.slug', $cheap->slug);
     }
 
     public function test_popularity_and_relevance_sort_by_popularity(): void

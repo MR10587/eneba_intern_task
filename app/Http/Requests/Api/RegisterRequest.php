@@ -18,7 +18,9 @@ class RegisterRequest extends ApiFormRequest
      */
     protected function prepareForValidation(): void
     {
-        if ($this->filled('email')) {
+        // Guard the type before normalising: an array `email` must fail the
+        // `string` rule below, not be coerced into "Array" with a PHP warning.
+        if (is_string($this->input('email'))) {
             $this->merge([
                 'email' => mb_strtolower(trim($this->string('email')->toString())),
             ]);
@@ -35,6 +37,14 @@ class RegisterRequest extends ApiFormRequest
             'email' => ['required', 'string', 'email', 'max:255', 'unique:users,email'],
             // `confirmed` requires a matching password_confirmation field.
             'password' => ['required', 'string', 'min:8', 'confirmed'],
+            // WHY: a newly registered account inherits any cart built as guest.
+            'cart_token' => [
+                'sometimes',
+                'nullable',
+                'string',
+                'max:128',
+                'regex:/^[A-Za-z0-9_-]{32,128}$/',
+            ],
         ];
     }
 }

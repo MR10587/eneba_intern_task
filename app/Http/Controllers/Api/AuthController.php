@@ -8,6 +8,7 @@ use App\Http\Requests\Api\RegisterRequest;
 use App\Http\Resources\UserResource;
 use App\Models\User;
 use App\Services\AuthService;
+use App\Services\CartService;
 use App\Support\ApiResponse;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -21,7 +22,10 @@ use Illuminate\Http\Request;
  */
 class AuthController extends Controller
 {
-    public function __construct(private readonly AuthService $auth) {}
+    public function __construct(
+        private readonly AuthService $auth,
+        private readonly CartService $cart,
+    ) {}
 
     /**
      * POST /api/auth/register
@@ -29,6 +33,7 @@ class AuthController extends Controller
     public function register(RegisterRequest $request): JsonResponse
     {
         $result = $this->auth->register($request->validated());
+        $this->cart->mergeGuest($result['user'], $request->validated('cart_token'));
 
         return ApiResponse::success($this->tokenPayload($result), status: 201);
     }
@@ -39,6 +44,7 @@ class AuthController extends Controller
     public function login(LoginRequest $request): JsonResponse
     {
         $result = $this->auth->login($request->validated());
+        $this->cart->mergeGuest($result['user'], $request->validated('cart_token'));
 
         return ApiResponse::success($this->tokenPayload($result));
     }

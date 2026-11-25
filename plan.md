@@ -1,131 +1,108 @@
-# Implementation Plan — Eneba-style Video Game Key Storefront
+# Implementation Record — Eneba-style Digital Marketplace
 
-## Confirmed decisions
+This file records the application as it is implemented. It is not a future roadmap; setup, endpoints, data, and verification below all match the current repository.
 
-- Laravel API (single backend) + separate Vite React/TypeScript SPA; Sanctum token auth.
-- Laravel Sail / Docker Compose with PostgreSQL for local development.
-- Typo-tolerant search via PostgreSQL `pg_trgm` (no external search service, no AI).
-- Deterministic simulated payments: card ending `0002` fails, all others succeed.
-- No hardcoded frontend data; all prices and totals computed by the backend.
-- No microservices, seller/admin dashboards, social login, email verification, refunds, or mobile app.
+## Current architecture
 
-## Target layout
+- Laravel 13 API at the repository root, PostgreSQL database, Sanctum personal access tokens.
+- Separate React 19 + TypeScript + Vite SPA in `frontend/`, served by `npm run dev` on port 5173 and proxying `/api` to `http://127.0.0.1:8000`.
+- Native PHP/Composer commands on Windows. There is no Docker/Sail configuration in use.
+- One backend service per domain area; the homepage blocks are independently configured by database rows rather than separate services.
+- All money is integer cents in EUR. The API computes prices, discounts, cart line totals, and order totals; the SPA only formats them.
 
-Laravel stays at the repo root so Sail works with defaults; the SPA is a separate package in `frontend/`.
+## Implemented API
 
+All routes are under `/api`.
+
+| Route | Access | Purpose |
+| --- | --- | --- |
+| `GET /home` | public | Enabled homepage blocks in `position`, then `id` order; the banner features only a purchasable product |
+| `GET /products/filters` | public | Backend-derived categories, platforms, regions, price bounds, currency |
+| `GET /products` | public | Active products with category/platform/region/price filters, sorting, pagination, applied filters |
+| `GET /products/{slug}` | public | Product details and active seller offers with availability |
+| `GET /search` | public | Typo/partial-tolerant product search with the same filters and pricing as catalog |
+| `POST /auth/register` | public | Email/password registration; returns a Sanctum token |
+| `POST /auth/login` | public | Email/password login; returns a Sanctum token |
+| `POST /auth/logout` | token | Revokes only the current token |
+| `GET /auth/me` | token | Current user |
+| `GET /cart` | public | Current cart (user or guest), line prices, total, and availability flags |
+| `POST /cart/items` | public | Add an active, purchasable offer by `product_id` + `offer_id` |
+| `DELETE /cart/items/{offer}` | public | Remove one of the current cart's lines |
+| `POST /checkout` | token | Simulated payment, transactional key allocation, order creation |
+| `GET /orders` | token | Current user's orders |
+| `GET /orders/{id}` | token | Current user's order detail with the delivered key |
+
+### Catalog and search filters
+
+- `category`: one of `Games`, `Gift Cards`, `Top-Ups`, `Hardware`, `Best Deals`. `Best Deals` is derived from persisted `compare_at_price_cents > min_price_cents`; the other four are stored on products.
+- `platform`, `region`: case-insensitive exact matches.
+- `min_price`, `max_price`: integer EUR cents; `max_price >= min_price`.
+- `sort`: `price_asc`, `price_desc`, `popularity`, `relevance`. `relevance` aliases `popularity` on the catalog endpoint.
+- `page`, `per_page`: pagination with `1–48` per page.
+- `/search` accepts all of the above except `sort`, plus required `q`. Filters are applied before pagination, so `result_count`, pagination metadata, and the returned grid always describe the same set.
+
+A purchasable offer is active and has at least one `available` digital key. `min_price_cents` is the cheapest such offer. Products with none are omitted from catalog, search, and home grids; their detail pages remain reachable and show sold-out offers as `available: false`.
+
+### Search behaviour
+
+PostgreSQL uses `pg_trgm` similarity plus a case-insensitive substring match, so `Minecraft`, `Minec`, and `mincraft` all match. SQLite tests use a `LIKE` fallback because it has no `similarity()` function; the PostgreSQL-only cases live in `tests/Feature/Api/PostgresSearchTest.php` and run with `phpunit.pgsql.xml`.
+
+### Cart, checkout, and orders
+
+- Cart identity comes from either `auth()->id()` or a server-issued guest token sent as `X-Cart-Token`; no client-supplied cart ID, user ID, price, or total is trusted. The token is echoed as `meta.cart_token` for anonymous requests.
+- Login/register accepts the same token as `cart_token`, merges guest lines into the user's cart, and deletes the guest cart. Checkout/orders stay token-protected.
+- Duplicate adds return `200`; new adds return `201`. Stale lines remain visible with `available: false` and are never silently repriced.
+- Checkout rejects unavailable or stale cart lines. The SPA hides checkout controls when a line is unavailable and redirects direct `/checkout` visits back to `/cart`.
+- Payment is simulated: a 13–19 digit card succeeds; a card ending in `0002` returns `402 PAYMENT_FAILED` before any write. Only masked last-four digits are persisted.
+- A failed payment creates no order and consumes no key. Successful checkout allocates one available key per line inside a transaction with a conditional key update and the unique `order_items.digital_key_id` index.
+- Orders are scoped to the authenticated user. Another user's order returns `404 NOT_FOUND`.
+
+All errors use the coded envelope, including `VALIDATION_ERROR` (422), `UNAUTHENTICATED` (401), `INVALID_CREDENTIALS` (401), `PRODUCT_NOT_FOUND` (404), `OFFER_NOT_FOUND` (404), `NOT_FOUND` (404), `INSUFFICIENT_INVENTORY` (409), and `PAYMENT_FAILED` (402).
+
+## Implemented SPA
+
+Routes:
+
+- `/` — live purple marketplace backed by `/home`, `/products`, `/search`, `/products/filters`, `/products/:slug`, and `/cart/items`; category buttons, search, filters, and pagination all hit the API.
+- `/browse`, `/home` — API-backed browsing homepage.
+- `/products`, `/products/:slug` — catalog filters/sort/pagination and seller offer selection.
+- `/search` — backend search results with result count.
+- `/login`, `/register` — token auth forms.
+- `/cart` — public cart with backend-computed totals; guests see a sign-in reminder at checkout.
+- `/checkout`, `/orders`, `/orders/:id` — signed-in purchase flow. Unavailable cart lines are named and block checkout.
+- `*` — not-found page.
+
+The auth token is persisted client-side through `AuthContext`; the guest cart token is stored under `eneba_cart_token` and sent on cart requests. Home blocks are rendered generically by `type`, so adding a configured block does not require frontend changes. Cart drawer focus trapping, body scroll lock, Escape close, category `aria-pressed`, clamped price inputs, toasts, loading, empty, and error states are implemented.
+
+## Seed data
+
+`DatabaseSeeder` is idempotent by natural keys and creates the demo user `test@example.com` / `password`, 3 sellers, 39 products, 98 offers, 401 digital keys, and 4 homepage blocks (one disabled). Product shelves cover games, gift cards, top-ups, and hardware; seeded deals and sold-out/inactive edge cases exercise backend pricing and error paths. Re-running the seeder never reassigns a key already used by an order.
+
+## Verification commands
+
+From the repository root in PowerShell:
+
+```powershell
+& 'C:\php\php.exe' artisan test
+& 'C:\php\php.exe' vendor/bin/pint --test
+& 'C:\php\php.exe' vendor/bin/phpunit -c phpunit.pgsql.xml
+& 'C:\php\php.exe' artisan route:list --path=api
 ```
-/
-├─ docker-compose.yml          # Sail: app (PHP/Laravel) + pgsql
-├─ app/ bootstrap/ config/ database/ routes/ tests/   # Laravel
-├─ frontend/                   # Vite + React + TS (own package.json)
-│  └─ src/{api,types,components,pages,styles}
-├─ public/                     # Laravel web root; built SPA assets served here
-├─ SPEC.md  AGENTS.md  CHAT_HISTORY.md  README.md  plan.md
+
+The PostgreSQL configuration uses the separate `eneba_store_test` database and enables the three `mincraft` typo cases. The default `phpunit.xml` uses in-memory SQLite and skips those cases cleanly.
+
+From `frontend/`:
+
+```powershell
+npm run typecheck
+npm test -- --run
+npm run lint
+npm run format:check
+npm run build
 ```
 
-Dev flow: Sail containers serve the API on `localhost`; Vite dev server proxies `/api` to it. For full-flow verification, build the SPA into `public/` and use Laravel's catch-all route so everything runs on one origin.
+Manual acceptance flow: `/` → `/products/:slug` → add offer as a guest → `/cart` → select checkout → `/login` or `/register` (guest lines are merged) → `/checkout` with `4242 4242 4242 0002` for failure or `4242 4242 4242 4242` for success → `/orders/:id` with delivered key → `/orders`.
 
-## Phase 0 — Scaffolding and toolchain
+## Current boundaries
 
-1. Initialise Laravel in place without disturbing the existing docs: `composer create-project laravel/laravel .` (preserve `SPEC.md`, `AGENTS.md`, `CHAT_HISTORY.md`).
-2. Add Sanctum via `php artisan install:api` (or install per the Laravel version actually resolved).
-3. Configure `.env` / `docker-compose.yml` for PostgreSQL: `DB_CONNECTION=pgsql`, `DB_HOST=pgsql`, matching credentials.
-4. Add a migration enabling `pg_trgm` (guarded so a restricted role does not break `migrate:fresh`).
-5. Scaffold the SPA: `npm create vite@latest frontend -- --template react-ts`; add `react-router-dom`, typed fetch wrapper, `vitest`, `@testing-library/react`, `jsdom`, ESLint + Prettier.
-6. Add convenience scripts (Sail aliases, `npm run dev/build/test/typecheck/lint`). Record the exact working commands in `AGENTS.md` — right now it explicitly notes none exist.
-
-**Exit:** `sail up -d`, `sail artisan migrate`, and `npm run dev` all work; `AGENTS.md` has real commands.
-
-## Phase 1 — Database schema and migrations
-
-- `users` — id, name, email (unique), password.
-- `products` — id, slug (unique), name, description, platform, genre, release_date, image_path, popularity, `compare_at_price_cents` (nullable, for deals), is_active, timestamps.
-- `sellers` — id, name, is_active.
-- `offers` — id, product_id FK, seller_id FK, region, `price_cents`, currency, is_active; index on `(product_id, is_active)`; guard against duplicate product/seller/region offers.
-- `digital_keys` — id, offer_id FK, code (unique), status (`available`/`sold`).
-- `carts` / `cart_items` — one cart per user; unique `(cart_id, offer_id)`; positive quantity.
-- `orders` — id, user_id FK, status (`pending`/`completed`/`failed`), `total_cents`, currency, payment_status, payment_reference, timestamps.
-- `order_items` — id, order_id FK, offer_id FK, quantity, `unit_price_cents`, `digital_key_id` FK **unique** (enforces one key → one order item).
-- `homepage_blocks` — id, key (unique), title, type (`banner`/`best_sellers`/`deals`), `config` jsonb, position, is_enabled. This is what makes blocks independently configurable without an admin UI (seed data is the configuration).
-- Sanctum `personal_access_tokens`.
-
-Money is stored as integer cents everywhere; never trust client-sent prices.
-
-**Exit:** `migrate:fresh --seed` succeeds and the uniqueness constraints exist.
-
-## Phase 2 — Backend API
-
-Thin controllers + FormRequests + service classes + API Resources + policies for ownership.
-
-Routes (all under `/api`):
-
-| Route | Purpose |
-| --- | --- |
-| `POST /auth/register`, `POST /auth/login`, `POST /auth/logout`, `GET /auth/me` | Email/password auth, user info + status |
-| `GET /home` | Enabled blocks in position order, each with its own fetched data |
-| `GET /products` | Filters (platform, region, min/max price), sort (`price_asc`, `price_desc`, `popularity`, `relevance`), pagination (page, per_page); returns items, pagination metadata, and applied filters; active products only |
-| `GET /products/{slug}` | Details + available seller offers with prices and regions |
-| `GET /search?q=` | Typo/partial-tolerant matches + result count |
-| `GET /cart`, `POST /cart/items`, `PATCH /cart/items/{offer}`, `DELETE /cart/items/{offer}` | Per-user cart; line prices and total from backend |
-| `POST /checkout` | Auth required; simulated payment; order ID, status, summary |
-| `GET /orders`, `GET /orders/{id}` | Signed-in user's own orders only |
-
-Search: GIN trigram index on `products.name`; rank by `similarity(name, ?)` with an `ILIKE '%term%'` fallback so `Minecraft`, `Minec`, and `mincraft` all match.
-
-Checkout transaction (the highest-risk part):
-
-1. Require auth; validate request.
-2. Open `DB::transaction`, lock the user's cart and the selected offer rows with `lockForUpdate`.
-3. Re-check product/offer active state and that enough keys are available (`insufficient inventory` error otherwise).
-4. Compute every price and the total in the backend from persisted offer prices.
-5. Simulate payment: last 4 digits `0002` → `payment_failed`; otherwise success.
-6. On success: create a completed order, allocate one available key per unit using `FOR UPDATE SKIP LOCKED`, create order items with the unique key FK, mark keys sold, clear the cart.
-7. On failure: create no completed order and deliver no keys; return the specified error shape.
-8. Map errors to the spec's categories: validation, authentication, product/offer not found, payment failure, insufficient inventory.
-
-**Exit:** feature tests cover every row in the table above and every business rule.
-
-## Phase 3 — Frontend SPA
-
-- Typed API client with DTOs for every endpoint; zero product/offer/block literals in components.
-- React Router pages: Home, Store, Search results, Product, Cart, Login, Register, Checkout, Order confirmation, Order history.
-- Persistent header search on every page routed to `/search?q=`.
-- Home renders `/home` blocks generically by `type` — adding a block requires no frontend change.
-- Store page drives filters, sort, and pagination entirely from API-supplied values and metadata.
-- Product page lists offers with price/region/availability and selects by `product_id` + `offer_id`.
-- Cart shows API-computed line prices and total with add/remove/quantity controls.
-- Checkout shows the backend order summary, a simulated card form, and a visible note that `0002` fails.
-- Route guards redirect unauthenticated users from checkout and order history.
-- Eneba-style design tokens (dark theme, accent gradients, spacing scale, component library) derived from the design reference; responsive layouts; loading, empty, and error states.
-
-**Exit:** the full flow is clickable against seeded data with no frontend data duplication.
-
-## Phase 4 — Seed data and styling
-
-- Seeders create ~30 recognisable games across Steam/Epic/Xbox/PlayStation, regions (Europe, Global, etc.), several sellers, multiple offers per product, real key codes, and homepage block configuration.
-- Include at least one deal product (`compare_at_price_cents`) and one out-of-stock offer to exercise error states.
-- Deterministic seeds so tests are repeatable.
-
-## Phase 5 — Verification
-
-Command order once tooling exists (to be copied into `AGENTS.md` with exact commands):
-
-1. `sail artisan migrate:fresh --seed`
-2. `sail artisan test` (focused: `sail artisan test --filter=CheckoutTest`)
-3. `cd frontend && npm run lint && npm run typecheck && npm run test && npm run build`
-
-Backend tests: registration/login; cart isolation between users; filter/sort/pagination metadata; typo search; failed payment creates no order/keys; successful payment assigns unique keys and clears cart; insufficient inventory; inactive products hidden; homepage block toggles; concurrent checkout cannot double-assign a key.
-
-Frontend tests: API-driven home block rendering; catalog filter/sort/pagination controls; auth guard redirect; checkout failure and success states.
-
-Manual full-flow checklist: Home → search (`mincraft`) → product + offers → add offer → register/sign in → checkout with failing card → retry with success card → order + key → order history.
-
-## Phase 6 — Docs and handoff
-
-- Write `README.md` with setup, env vars, commands, and the test card rule.
-- Replace the "no commands yet" note in `AGENTS.md` with verified commands and add the Sail/Vite layout and checkout invariants.
-- Keep `CHAT_HISTORY.md` current with decisions made during implementation.
-
-## Out of scope
-
-Real payments, AI, seller/admin dashboards, social login, email verification, refunds/disputes, native mobile, microservices, autocomplete (explicitly not MVP).
+No real payment processing, AI integration, seller/admin dashboards, refunds/disputes, native mobile app, microservices, social login, email verification, seller registration, autocomplete, or copied Eneba artwork/logo.

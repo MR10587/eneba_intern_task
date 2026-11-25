@@ -15,15 +15,16 @@ use Illuminate\Support\Facades\DB;
  *  2. PostgreSQL uses pg_trgm similarity so typos such as "mincraft" match
  *     "Minecraft"; SQLite falls back to plain LIKE because it has no trigram
  *     functions. Both paths are parameterised — no user text becomes SQL.
- *  3. Search results carry the same computed price fields as catalog results.
+ *  3. Search results carry the same computed price fields as catalog results
+ *     and honour the same category/platform/region/price filters.
  */
 class SearchService
 {
     public function __construct(private readonly CatalogService $catalog) {}
 
     /**
-     * @param  array{q: string, page?: int, per_page?: int}  $filters
-     * @return array{paginator: LengthAwarePaginator, query: string}
+     * @param  array<string, mixed>  $filters
+     * @return array{paginator: LengthAwarePaginator, query: string, applied_filters: array<string, mixed>}
      */
     public function search(array $filters): array
     {
@@ -58,11 +59,18 @@ class SearchService
             $this->applyFallbackSearch($query, $term);
         }
 
+        // Filters are ANDed with the text match and applied before pagination.
+        $this->catalog->applyFilters($query, $filters);
+
         $perPage = (int) ($filters['per_page'] ?? config('catalog.per_page'));
         $page = (int) ($filters['page'] ?? 1);
         $paginator = $query->paginate($perPage, ['*'], 'page', $page);
 
-        return ['paginator' => $paginator, 'query' => $term];
+        return [
+            'paginator' => $paginator,
+            'query' => $term,
+            'applied_filters' => $this->catalog->appliedFilters($filters),
+        ];
     }
 
     /**

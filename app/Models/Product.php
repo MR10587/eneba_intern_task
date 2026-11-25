@@ -12,6 +12,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
     'name',
     'description',
     'platform',
+    'category',
     'genre',
     'release_date',
     'image_path',

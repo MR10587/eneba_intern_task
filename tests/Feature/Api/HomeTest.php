@@ -74,6 +74,42 @@ class HomeTest extends TestCase
             ->assertJsonPath('data.2.key', 'third');
     }
 
+    public function test_banner_replaces_a_sold_out_featured_product_with_an_available_one(): void
+    {
+        $soldOut = Product::factory()->create([
+            'name' => 'Sold Out Featured Game',
+            'slug' => 'sold-out-featured-game',
+        ]);
+        $soldOutOffer = Offer::factory()->for($soldOut)->create(['price_cents' => 100]);
+        DigitalKey::factory()->for($soldOutOffer)->sold()->create();
+
+        $available = $this->purchasableProduct([
+            'name' => 'Available Featured Game',
+            'slug' => 'available-featured-game',
+            'popularity' => 100,
+        ], 1999);
+
+        HomepageBlock::factory()->ofType('banner')->create([
+            'key' => 'hero',
+            'title' => 'Featured game',
+            'position' => 0,
+            'config' => [
+                'headline' => 'Featured this week',
+                'subheadline' => 'A great price',
+                'cta_label' => 'Buy now',
+                'cta_href' => '/products/sold-out-featured-game',
+                'product_slug' => $soldOut->slug,
+            ],
+        ]);
+
+        $this->getJson('/api/home')
+            ->assertOk()
+            ->assertJsonPath('data.0.data.headline', 'Featured this week')
+            ->assertJsonPath('data.0.data.product.slug', $available->slug)
+            ->assertJsonPath('data.0.data.product.available', true)
+            ->assertJsonPath('data.0.data.cta_href', '/products/available-featured-game');
+    }
+
     public function test_banner_resolves_active_product_and_config_copy(): void
     {
         $product = $this->purchasableProduct([
@@ -113,13 +149,20 @@ class HomeTest extends TestCase
         $this->assertArrayNotHasKey('offers', $response->json('data.0.data.product'));
     }
 
-    public function test_banner_with_missing_or_inactive_product_degrades_to_null(): void
+    public function test_banner_with_unusable_product_degrades_to_null(): void
     {
         $inactive = $this->purchasableProduct([
             'name' => 'Inactive Banner Game',
             'slug' => 'inactive-banner-game',
             'is_active' => false,
         ]);
+
+        $soldOut = Product::factory()->create([
+            'name' => 'Sold Out Banner Game',
+            'slug' => 'sold-out-banner-game',
+        ]);
+        $offer = Offer::factory()->for($soldOut)->create();
+        DigitalKey::factory()->for($offer)->sold()->create();
 
         HomepageBlock::factory()->ofType('banner')->create([
             'key' => 'missing-product-banner',
@@ -137,13 +180,24 @@ class HomeTest extends TestCase
                 'product_slug' => $inactive->slug,
             ],
         ]);
+        HomepageBlock::factory()->ofType('banner')->create([
+            'key' => 'sold-out-product-banner',
+            'position' => 2,
+            'config' => [
+                'headline' => 'Still renders too',
+                'product_slug' => $soldOut->slug,
+            ],
+        ]);
 
         $this->getJson('/api/home')
             ->assertOk()
             ->assertJsonPath('data.0.data.headline', 'Still renders')
             ->assertJsonPath('data.0.data.product', null)
+            ->assertJsonPath('data.0.data.cta_href', null)
             ->assertJsonPath('data.1.data.headline', 'Also renders')
-            ->assertJsonPath('data.1.data.product', null);
+            ->assertJsonPath('data.1.data.product', null)
+            ->assertJsonPath('data.2.data.headline', 'Still renders too')
+            ->assertJsonPath('data.2.data.product', null);
     }
 
     public function test_best_sellers_honors_limit_and_popularity_order(): void
@@ -151,6 +205,10 @@ class HomeTest extends TestCase
         $this->purchasableProduct(['name' => 'Low Pop', 'popularity' => 10], 1000);
         $high = $this->purchasableProduct(['name' => 'High Pop', 'popularity' => 900], 1000);
         $mid = $this->purchasableProduct(['name' => 'Mid Pop', 'popularity' => 500], 1000);
+
+        $soldOut = Product::factory()->create(['name' => 'Sold Out Pop', 'popularity' => 1000]);
+        $soldOutOffer = Offer::factory()->for($soldOut)->create(['price_cents' => 100]);
+        DigitalKey::factory()->for($soldOutOffer)->sold()->create();
 
         HomepageBlock::factory()->ofType('best_sellers')->create([
             'key' => 'best-sellers',

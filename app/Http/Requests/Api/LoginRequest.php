@@ -15,7 +15,8 @@ class LoginRequest extends ApiFormRequest
      */
     protected function prepareForValidation(): void
     {
-        if ($this->filled('email')) {
+        // Match SearchRequest: never coerce an array into a PHP string here.
+        if (is_string($this->input('email'))) {
             $this->merge([
                 'email' => mb_strtolower(trim($this->string('email')->toString())),
             ]);
@@ -32,6 +33,15 @@ class LoginRequest extends ApiFormRequest
             // No min:8 here: password rules belong to registration, otherwise
             // existing credentials could become impossible to submit.
             'password' => ['required', 'string'],
+            // WHY: lets a guest cart follow the shopper into their account.
+            // It is an opaque token, not a cart or user ID.
+            'cart_token' => [
+                'sometimes',
+                'nullable',
+                'string',
+                'max:128',
+                'regex:/^[A-Za-z0-9_-]{32,128}$/',
+            ],
         ];
     }
 }

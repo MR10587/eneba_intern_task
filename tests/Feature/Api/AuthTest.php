@@ -89,6 +89,30 @@ class AuthTest extends TestCase
         $this->assertSame(0, User::count());
     }
 
+    public function test_array_email_returns_coded_validation_error(): void
+    {
+        $this->postJson('/api/auth/register', [
+            'name' => 'Ada Lovelace',
+            'email' => ['nested' => 'not-an-email'],
+            'password' => 'password123',
+            'password_confirmation' => 'password123',
+        ])
+            ->assertUnprocessable()
+            ->assertJsonPath('code', 'VALIDATION_ERROR')
+            ->assertJsonStructure(['message', 'code', 'errors' => ['email']]);
+
+        $this->postJson('/api/auth/login', [
+            'email' => ['nested' => 'not-an-email'],
+            'password' => 'password123',
+        ])
+            ->assertUnprocessable()
+            ->assertJsonPath('code', 'VALIDATION_ERROR')
+            ->assertJsonStructure(['message', 'code', 'errors' => ['email']]);
+
+        $this->assertSame(0, User::count());
+        $this->assertSame(0, PersonalAccessToken::count());
+    }
+
     public function test_login_returns_token_for_valid_credentials(): void
     {
         $user = User::factory()->create([

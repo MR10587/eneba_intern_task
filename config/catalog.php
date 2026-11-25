@@ -13,4 +13,11 @@ return [
      */
     'per_page' => 12,
     'max_per_page' => 48,
+
+    /**
+     * Storefront shelves exposed by /products/filters and accepted as the
+     * `category` query parameter. "Best Deals" is derived from persisted
+     * compare-at/min prices; the other four are stored on products.category.
+     */
+    'categories' => ['Games', 'Gift Cards', 'Top-Ups', 'Hardware', 'Best Deals'],
 ];

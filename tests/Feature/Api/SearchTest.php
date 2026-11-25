@@ -63,6 +63,29 @@ class SearchTest extends TestCase
         $this->assertArrayNotHasKey('offers', $response->json('data.0'));
     }
 
+    public function test_search_honours_marketplace_filters_before_pagination(): void
+    {
+        $giftCard = $this->purchasableProduct(
+            ['name' => 'Minec Gift Card', 'category' => 'Gift Cards', 'platform' => 'Steam'],
+            2000,
+            ['region' => 'Europe'],
+        );
+        $this->purchasableProduct(
+            ['name' => 'Minecraft Game', 'category' => 'Games', 'platform' => 'Xbox'],
+            3000,
+            ['region' => 'US'],
+        );
+
+        $response = $this->getJson('/api/search?q=minec&category=Gift%20Cards&platform=Steam&region=Europe&max_price=2000');
+
+        $response->assertOk()
+            ->assertJsonCount(1, 'data')
+            ->assertJsonPath('data.0.slug', $giftCard->slug)
+            ->assertJsonPath('meta.result_count', 1)
+            ->assertJsonPath('meta.applied_filters.category', 'Gift Cards')
+            ->assertJsonPath('meta.applied_filters.max_price_cents', 2000);
+    }
+
     public function test_search_never_returns_inactive_products(): void
     {
         $hidden = $this->purchasableProduct(['name' => 'Hidden Quest', 'is_active' => false]);
@@ -75,6 +98,18 @@ class SearchTest extends TestCase
         $this->assertTrue($slugs->contains($visible->slug));
         $this->assertFalse($slugs->contains($hidden->slug));
         $response->assertJsonPath('meta.result_count', 1);
+    }
+
+    public function test_search_hides_sold_out_products(): void
+    {
+        $product = Product::factory()->create(['name' => 'Sold Out Search Game']);
+        $offer = Offer::factory()->for($product)->create(['price_cents' => 1200]);
+        DigitalKey::factory()->for($offer)->sold()->create();
+
+        $this->getJson('/api/search?q=sold%20out')
+            ->assertOk()
+            ->assertJsonCount(0, 'data')
+            ->assertJsonPath('meta.result_count', 0);
     }
 
     public function test_sold_out_offers_do_not_contribute_to_search_prices(): void
@@ -158,5 +193,10 @@ class SearchTest extends TestCase
             ->assertStatus(422)
             ->assertJsonPath('code', 'VALIDATION_ERROR')
             ->assertJsonStructure(['message', 'code', 'errors' => ['q', 'per_page']]);
+
+        $this->getJson('/api/search?q=minecraft&category=Consoles')
+            ->assertStatus(422)
+            ->assertJsonPath('code', 'VALIDATION_ERROR')
+            ->assertJsonStructure(['message', 'code', 'errors' => ['category']]);
     }
 }
